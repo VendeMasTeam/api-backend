@@ -126,7 +126,7 @@ class AdminTenantController extends Controller
                 ]);
             }
 
-            $tenant = DB::transaction(function () use ($validated, $plan, $roleProvisioner, $stageProvisioner, $tenantSchemaService) {
+            $tenant = DB::transaction(function () use ($validated, $plan, $roleProvisioner, $tenantSchemaService) {
                 $tenant = Tenant::query()->create([
                     'name' => $validated['nombre'],
                     'domain' => $validated['dominio'],
@@ -141,12 +141,16 @@ class AdminTenantController extends Controller
                     'expires_at' => $validated['estado'] === 'VENCIDO' ? now() : null,
                 ]);
 
-                $tenantSchemaService->provision($tenant);
                 $roleProvisioner->provision($tenant);
-                $stageProvisioner->provision($tenant);
+                $tenantSchemaService->provision($tenant);
 
                 return $tenant;
             });
+
+            $tenant = $tenantSchemaService->bootstrapTenant(
+                $tenant,
+                fn (Tenant $tenant, bool $usingSchema) => $stageProvisioner->provision($tenant)
+            );
 
             return $this->successResponse($this->serializeTenant($tenant->fresh('plan')), 201, 'Tenant creado');
         } catch (ValidationException $e) {

@@ -16,6 +16,31 @@ class TenantSchemaService
         return $this->createSchema($tenant);
     }
 
+    public function bootstrapTenant(Tenant $tenant, ?callable $afterMigrations = null, string $path = 'database/migrations/tenant'): Tenant
+    {
+        $this->createSchema($tenant);
+
+        if (! $this->supportsSchemas()) {
+            if ($afterMigrations) {
+                $afterMigrations($tenant, false);
+            }
+
+            return $tenant->refresh();
+        }
+
+        $this->runTenantMigrations($tenant, $path);
+        $tenant = $this->markMigrated($tenant);
+
+        if ($afterMigrations) {
+            $this->runForTenant(
+                $tenant,
+                fn (Tenant $tenant, bool $usingSchema) => $afterMigrations($tenant, $usingSchema)
+            );
+        }
+
+        return $tenant->refresh();
+    }
+
     public function createSchema(Tenant $tenant): string
     {
         $schemaName = $this->ensureSchemaName($tenant);
