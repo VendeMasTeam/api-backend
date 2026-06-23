@@ -153,12 +153,14 @@ class Quotation extends Model
 
     public function getReservedItemsCountAttribute(): int
     {
-        return $this->items()->get()->filter(fn (QuotationItem $item) => $item->reserved_quantity > 0)->count();
+        return $this->stockReservableItems()
+            ->filter(fn (QuotationItem $item) => $item->reserved_quantity > 0)
+            ->count();
     }
 
     public function getReservationIndicatorAttribute(): string
     {
-        $items = $this->items()->get();
+        $items = $this->stockReservableItems();
 
         if ($items->isEmpty()) {
             return 'not_reserved';
@@ -172,6 +174,19 @@ class Quotation extends Model
             $partiallyReserved => 'partial',
             default => 'not_reserved',
         };
+    }
+
+    private function stockReservableItems()
+    {
+        return $this->items()
+            ->with('catalogProduct')
+            ->get()
+            ->filter(function (QuotationItem $item) {
+                $catalogType = strtolower((string) $item->catalogProduct?->type);
+
+                return ! in_array($catalogType, ['service', 'services', 'servicio'], true);
+            })
+            ->values();
     }
 
     public function resolveDefaultOwnerUserId(): ?int

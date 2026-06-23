@@ -125,27 +125,7 @@ class InvoiceService
                 $this->documentValidationService->ensureReadyForAccount($entity);
             }
 
-            foreach ($quotation->items as $item) {
-                if ($item->quantity <= 0) {
-                    continue;
-                }
-
-                if (! $this->itemRequiresStockReservation($item)) {
-                    continue;
-                }
-
-                if (! $item->product_id || ! $item->warehouse_id) {
-                    throw ValidationException::withMessages([
-                        'quotation_uid' => ['Todos los items deben tener producto y bodega para facturar'],
-                    ]);
-                }
-
-                if ($item->reserved_quantity < $item->quantity) {
-                    throw ValidationException::withMessages([
-                        'quotation_uid' => ['No puedes facturar sin stock reservado suficiente para todos los items'],
-                    ]);
-                }
-            }
+            $this->ensureQuotationItemsAreReadyToInvoice($quotation);
 
             $invoiceNumber = $this->generateInvoiceNumber($quotation->tenant_id);
 
@@ -411,10 +391,68 @@ class InvoiceService
 
     private function itemRequiresStockReservation(QuotationItem $item): bool
     {
-        if ($item->catalogProduct?->type === 'service') {
+        $catalogType = strtolower((string) $item->catalogProduct?->type);
+
+        if (in_array($catalogType, ['service', 'services', 'servicio'], true)) {
             return false;
         }
 
         return true;
+    }
+
+    private function ensureQuotationItemsAreReadyToInvoice(Quotation $quotation): void
+    {
+        $missingSetup = [];
+        $missingReservations = [];
+
+        foreach ($quotation->items as $item) {
+            if ($item->quantity <= 0 || ! $this->itemRequiresStockReservation($item)) {
+                continue;
+            }
+
+            if (! $item->product_id || ! $item->warehouse_id) {
+                $missingSetup[] = $this->stockValidationMessage($item, 'no tiene producto de inventario o bodega asociada');
+
+                continue;
+            }
+
+            if ($item->reserved_quantity < $item->quantity) {
+                $missingReservations[] = $this->stockValidationMessage(
+                    $item,
+                    sprintf(
+                        'requiere %s unidades, tiene %s reservadas y faltan %s',
+                        (int) $item->quantity,
+                        (int) $item->reserved_quantity,
+                        max(0, (int) $item->quantity - (int) $item->reserved_quantity)
+                    )
+                );
+            }
+        }
+
+        if ($missingSetup !== []) {
+            throw ValidationException::withMessages([
+                'quotation_uid' => ['Hay items de producto sin configuracion de inventario para facturar'],
+                'items' => $missingSetup,
+            ]);
+        }
+
+        if ($missingReservations !== []) {
+            throw ValidationException::withMessages([
+                'quotation_uid' => ['No puedes facturar sin stock reservado suficiente para los productos fisicos'],
+                'items' => $missingReservations,
+            ]);
+        }
+    }
+
+    private function stockValidationMessage(QuotationItem $item, string $reason): string
+    {
+        $name = $item->catalogProduct?->name
+            ?? $item->product?->name
+            ?? $item->description
+            ?? 'Item sin nombre';
+        $sku = $item->sku ? ' SKU '.$item->sku : '';
+        $warehouse = $item->warehouse?->name ? ' en '.$item->warehouse->name : '';
+
+        return trim($name.$sku.$warehouse.': '.$reason);
     }
 }

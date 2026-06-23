@@ -742,6 +742,102 @@ class SalesBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.total', '900.00');
     }
 
+    public function test_invoice_stock_validation_reports_only_physical_products_without_reserved_stock(): void
+    {
+        $user = $this->authenticateWithPermissions(['finance.manage']);
+        $account = $this->account($user);
+        $inventoryProduct = InventoryProduct::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'sku' => 'INV-CAM-001',
+            'name' => 'Camisa inventario',
+            'cost_price' => 5000,
+            'sale_price' => 20000,
+            'is_active' => true,
+        ]);
+        $catalogProduct = Product::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'inventory_product_id' => $inventoryProduct->getKey(),
+            'name' => 'Camisa',
+            'type' => 'product',
+            'sku' => 'CAM-26-001',
+            'status' => 'active',
+        ]);
+        $service = Product::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Consultoria',
+            'type' => 'service',
+            'sku' => 'SERV-CONSULT',
+            'status' => 'active',
+        ]);
+        $warehouse = Warehouse::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Bodega Principal',
+            'code' => 'MAIN',
+        ]);
+        InventoryStock::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'product_id' => $inventoryProduct->getKey(),
+            'warehouse_id' => $warehouse->getKey(),
+            'physical_stock' => 10,
+            'reserved_stock' => 0,
+        ]);
+        $quotation = Quotation::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'quoteable_type' => Account::class,
+            'quoteable_id' => $account->getKey(),
+            'quote_number' => 'Q-STOCK-DETAIL-'.uniqid(),
+            'title' => 'Cotizacion mixta',
+            'status' => 'approved',
+            'currency' => 'COP',
+        ]);
+
+        QuotationItem::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'quotation_id' => $quotation->getKey(),
+            'product_id' => $inventoryProduct->getKey(),
+            'catalog_product_id' => $catalogProduct->getKey(),
+            'warehouse_id' => $warehouse->getKey(),
+            'sku' => 'CAM-26-001',
+            'description' => 'Camisa',
+            'quantity' => 2,
+            'list_unit_price' => 20000,
+            'discount_percent' => 0,
+            'discount_amount' => 0,
+            'net_unit_price' => 20000,
+            'unit_price' => 20000,
+        ]);
+        QuotationItem::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'quotation_id' => $quotation->getKey(),
+            'catalog_product_id' => $service->getKey(),
+            'sku' => 'SERV-CONSULT',
+            'description' => 'Consultoria',
+            'quantity' => 1,
+            'list_unit_price' => 900,
+            'discount_percent' => 0,
+            'discount_amount' => 0,
+            'net_unit_price' => 900,
+            'unit_price' => 900,
+        ]);
+
+        $response = $this->postJson('/api/finance/invoices', [
+            'quotation_uid' => $quotation->uid,
+            'currency' => 'COP',
+        ]);
+
+        $response
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.quotation_uid.0', 'No puedes facturar sin stock reservado suficiente para los productos fisicos');
+
+        $messages = $response->json('errors.items');
+
+        $this->assertCount(1, $messages);
+        $this->assertStringContainsString('Camisa', $messages[0]);
+        $this->assertStringContainsString('faltan 2', $messages[0]);
+        $this->assertStringNotContainsString('Consultoria', implode(' ', $messages));
+    }
+
     public function test_approving_quotation_resolves_catalog_product_and_allocates_stock(): void
     {
         $user = $this->authenticateWithPermissions([
