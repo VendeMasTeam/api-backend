@@ -38,6 +38,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'feature' => \App\Http\Middleware\CheckFeatureEnabled::class,
             'platform.admin' => \App\Http\Middleware\EnsurePlatformAdminAccess::class,
             'platform.permission' => \App\Http\Middleware\EnsurePlatformPermission::class,
+            'support.readonly' => \App\Http\Middleware\EnsureSupportReadOnly::class,
             'docs.auth' => \App\Http\Middleware\ProtectApiDocs::class,
         ]);
     })

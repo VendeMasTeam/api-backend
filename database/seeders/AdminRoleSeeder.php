@@ -47,6 +47,7 @@ class AdminRoleSeeder extends Seeder
         $supportPermissions = Permission::query()->whereIn('key', [
             'admin.dashboard.read',
             'admin.tenants.manage',
+            'admin.tenants.support',
             'admin.telemetry.read',
             'admin.alerts.manage',
         ])->pluck('id');

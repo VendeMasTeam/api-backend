@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\SegmentController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\StaticOptionController;
+use App\Http\Controllers\Api\SupportSessionController;
 use App\Http\Controllers\Api\TagController;
 use App\Http\Controllers\Api\TaskController;
 use App\Http\Controllers\Api\TeamController;
@@ -82,11 +83,13 @@ Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.sche
 |--------------------------------------------------------------------------
 */
 
-Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.schema', 'full.access'])->group(function () {
+Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.schema', 'full.access', 'support.readonly'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::get('/me/features', [AuthController::class, 'features']);
     Route::put('/me', [AuthController::class, 'updateMe']);
     Route::get('/auth/init', [AuthController::class, 'init']);
+    Route::get('/support-session/current', [SupportSessionController::class, 'current']);
+    Route::post('/support-session/stop', [SupportSessionController::class, 'stop']);
     Route::post('/2fa/recovery-codes/regenerate', [AuthController::class, 'regenerateRecoveryCodes']);
     Route::delete('/2fa', [AuthController::class, 'disableTwoFactor']);
 
@@ -617,6 +620,7 @@ Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('ad
         Route::post('/{uid}/users/{userUid}/lock', [AdminTenantController::class, 'lockUser'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/users/{userUid}/unlock', [AdminTenantController::class, 'unlockUser'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/users/{userUid}/2fa/reset', [AdminTenantController::class, 'resetUserTwoFactor'])->middleware('permission:admin.tenants.manage');
+        Route::post('/{uid}/support-login', [AdminTenantController::class, 'supportLogin'])->middleware('permission:admin.tenants.support');
     });
 
     Route::prefix('billing')->group(function () {

@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\OpportunityStageProvisioner;
 use App\Services\PlanPermissionService;
+use App\Services\SupportSessionService;
 use App\Services\TenantRoleProvisioner;
 use App\Services\TenantSchemaService;
 use App\Services\TwoFactorService;
@@ -706,6 +707,47 @@ class AdminTenantController extends Controller
         }
 
         return $this->successResponse($permissions);
+    }
+
+    public function supportLogin(Request $request, string $uid, SupportSessionService $supportSessionService)
+    {
+        try {
+            $validated = $request->validate([
+                'reason' => 'required|string|min:5|max:500',
+            ]);
+
+            $tenant = Tenant::query()->where('uid', $uid)->first();
+
+            if (!$tenant) {
+                return $this->errorResponse('Tenant no encontrado', 404);
+            }
+
+            if (!$tenant->isActive()) {
+                return $this->errorResponse('Tenant inactivo', 422, [
+                    'tenant' => ['No puedes ingresar en modo soporte a un tenant inactivo'],
+                ]);
+            }
+
+            return $this->successResponse(
+                $supportSessionService->start(
+                    $request->user(),
+                    $tenant,
+                    $validated['reason'],
+                    $request->ip(),
+                    $request->userAgent()
+                ),
+                201,
+                'Sesion de soporte iniciada'
+            );
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        } catch (\RuntimeException $e) {
+            return $this->errorResponse('Validation error', 422, [
+                'support' => [$e->getMessage()],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
+        }
     }
 
     private function serializeTenant(Tenant $tenant): array

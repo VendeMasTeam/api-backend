@@ -460,6 +460,39 @@ paths:
           $ref: '#/components/responses/GenericSuccess'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /admin/tenants/{uid}/support-login:
+    post:
+      tags: [Admin]
+      summary: Ingresar a un tenant en modo soporte
+      description: >-
+        Requiere superadmin global con permiso `admin.tenants.support`.
+        Crea una sesion auditada de soporte de solo lectura usando un token temporal del owner activo del tenant.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                  example: Soporte solicitado por el cliente para revisar pipeline
+      responses:
+        '201':
+          description: Sesion de soporte iniciada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSessionStartEnvelope'
+        '403':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /admin/billing:
     get:
       tags: [Admin]
@@ -4178,6 +4211,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthInitEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /support-session/current:
+    get:
+      tags: [Auth]
+      summary: Consultar sesion de soporte actual
+      description: Devuelve `active=false` cuando el token actual no pertenece a una sesion de soporte.
+      responses:
+        '200':
+          description: Operacion exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSessionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /support-session/stop:
+    post:
+      tags: [Auth]
+      summary: Salir del modo soporte
+      description: Cierra la sesion de soporte actual y revoca el token temporal.
+      responses:
+        '200':
+          description: Sesion de soporte finalizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSessionEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
   /metrics/my-usage:
@@ -10428,6 +10489,79 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/FeatureFlags'
+    SupportSession:
+      type: object
+      properties:
+        active:
+          type: boolean
+          example: true
+        uid:
+          type: string
+          format: uuid
+        tenant_uid:
+          type: string
+          format: uuid
+        tenant_name:
+          type: string
+          example: Acme Corporation
+        support_user_uid:
+          type: string
+          format: uuid
+        support_user_name:
+          type: string
+          example: Soporte Plataforma
+        impersonated_user_uid:
+          type: string
+          format: uuid
+        impersonated_user_email:
+          type: string
+          format: email
+        reason:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        mode:
+          type: string
+          example: support
+        readonly:
+          type: boolean
+          example: true
+    SupportSessionEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/SupportSession'
+                - type: object
+                  properties:
+                    active:
+                      type: boolean
+                      example: false
+    SupportSessionStartEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                token:
+                  type: string
+                expires_at:
+                  type: string
+                  format: date-time
+                session:
+                  $ref: '#/components/schemas/SupportSession'
     AuthInitEnvelope:
       allOf:
         - $ref: '#/components/schemas/SuccessEnvelope'
@@ -10454,6 +10588,14 @@ components:
                   type: array
                   items:
                     type: string
+                support_mode:
+                  oneOf:
+                    - $ref: '#/components/schemas/SupportSession'
+                    - type: object
+                      properties:
+                        active:
+                          type: boolean
+                          example: false
     SuccessEnvelope:
       type: object
       example:

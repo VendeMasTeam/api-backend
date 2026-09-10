@@ -13,7 +13,7 @@ trait TenantScope
         static::addGlobalScope('tenant', function (Builder $builder) {
 
             // Solo aplica si hay usuario autenticado
-            if (Auth::check()) {
+            if (Auth::hasUser()) {
                 $builder->where('tenant_id', Auth::user()->tenant_id);
             }
 
@@ -22,7 +22,7 @@ trait TenantScope
         //  AUTO-ASIGNAR tenant_id AL CREAR
         static::creating(function ($model) {
 
-            if (Auth::check() && empty($model->tenant_id)) {
+            if (Auth::hasUser() && empty($model->tenant_id)) {
                 $model->tenant_id = Auth::user()->tenant_id;
             }
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\PlanPermissionService;
 use App\Services\PlatformInitService;
+use App\Services\SupportSessionService;
 use App\Services\TwoFactorService;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\Request;
@@ -20,7 +21,8 @@ class AuthController extends Controller
 {
     public function __construct(
         protected TwoFactorService $twoFactorService,
-        protected PlatformInitService $platformInitService
+        protected PlatformInitService $platformInitService,
+        protected SupportSessionService $supportSessionService
     ) {
     }
 
@@ -140,7 +142,13 @@ class AuthController extends Controller
 
     public function init(Request $request)
     {
-        return $this->successResponse($this->platformInitService->init($request->user()));
+        $payload = $this->platformInitService->init($request->user());
+        $payload['support_mode'] = $this->supportSessionService->currentPayload(
+            $request->user(),
+            $request->user()?->currentAccessToken()
+        );
+
+        return $this->successResponse($payload);
     }
 
     public function logout(Request $request)
