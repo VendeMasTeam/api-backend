@@ -57,13 +57,13 @@ class AuthController extends Controller
         }
 
         if (!$user->hasTwoFactorEnabled()) {
-            $setupToken = $this->createSetupToken($user);
+            $this->clearSecurityCounters($user, $request->ip());
+            $token = $this->createFullAccessToken($user);
 
             return $this->successResponse([
-                'requires_two_factor_setup' => true,
-                'token' => $setupToken,
+                'token' => $token,
                 'user' => $this->serializeUser($user),
-            ], 200, 'Debes configurar 2FA antes de acceder');
+            ]);
         }
 
         $code = $request->input('two_factor_code');
@@ -321,6 +321,29 @@ class AuthController extends Controller
         return $this->successResponse([
             'recovery_codes' => $recoveryCodes['plain'],
         ], 200, 'Recovery codes regenerados');
+    }
+
+    public function disableTwoFactor(Request $request)
+    {
+        $validated = $request->validate([
+            'password' => 'required|string',
+        ]);
+
+        $user = $request->user();
+
+        if (!Hash::check($validated['password'], $user->password)) {
+            return $this->errorResponse('Validation error', 422, [
+                'password' => ['La contraseña no es correcta'],
+            ]);
+        }
+
+        if ($user->hasTwoFactorEnabled()) {
+            $user = $this->twoFactorService->disableForUser($user);
+        }
+
+        return $this->successResponse([
+            'user' => $this->serializeUser($user),
+        ], 200, '2FA desactivado correctamente');
     }
 
     private function serializeUser(User $user): array

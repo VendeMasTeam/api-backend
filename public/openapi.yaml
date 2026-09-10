@@ -56,7 +56,12 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CurrencyConvertRequest'
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  example: '123456'
       responses:
         '200':
           description: Operacion exitosa
@@ -68,7 +73,16 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/CurrencyConversion'
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                          recovery_codes:
+                            type: array
+                            items:
+                              type: string
+                          user:
+                            $ref: '#/components/schemas/AuthUser'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -77,19 +91,58 @@ paths:
     post:
       tags: [Auth]
       summary: 'Regenerar codigos 2FA - 2fa/recovery-codes/regenerate'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GenericRequest'
       responses:
         '200':
           description: Operacion exitosa
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessEnvelope'
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          recovery_codes:
+                            type: array
+                            items:
+                              type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /2fa:
+    delete:
+      tags: [Auth]
+      summary: Desactivar 2FA propio
+      description: Requiere token con acceso completo y valida la password actual del usuario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: 2FA desactivado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: '#/components/schemas/AuthUser'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -104,7 +157,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlanArrayEnvelope'
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          already_enabled:
+                            type: boolean
+                          secret:
+                            type: string
+                          otpauth_url:
+                            type: string
+                          user:
+                            $ref: '#/components/schemas/AuthUser'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -231,6 +298,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminTenantEnvelope'
+    delete:
+      tags: [Admin]
+      summary: Eliminar tenant
+      description: Borrado logico. Marca el tenant como `ARCHIVADO`, lo desactiva, bloquea sus usuarios y revoca tokens. No elimina schema ni datos fisicos.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      responses:
+        '200':
+          description: Tenant eliminado logicamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTenantEnvelope'
+        '404':
+          description: Tenant no encontrado
   /admin/tenants/{uid}/activate:
     post:
       tags: [Admin]
@@ -277,6 +359,20 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
+        - in: query
+          name: search
+          schema:
+            type: string
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [owner, manager, seller]
+        - in: query
+          name: estado
+          schema:
+            type: string
+            enum: [ACTIVO, INACTIVO, active, inactive]
       responses:
         '200':
           description: Operacion exitosa
@@ -303,6 +399,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminTenantUserCreateEnvelope'
+  /admin/tenants/{uid}/users/{userUid}:
+    put:
+      tags: [Admin]
+      summary: Actualizar usuario de tenant desde superadmin
+      description: Requiere acceso de plataforma y permiso `admin.tenants.manage`.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+        - in: path
+          name: userUid
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                  nullable: true
+                role:
+                  type: string
+                  enum: [owner, manager, seller]
+                is_active:
+                  type: boolean
+                active:
+                  type: boolean
+                status:
+                  type: string
+                  enum: [ACTIVO, INACTIVO, active, inactive]
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Admin]
+      summary: Eliminar usuario de tenant desde superadmin
+      description: Borrado logico. Bloquea el usuario y revoca sus tokens. No permite eliminar el ultimo owner activo.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+        - in: path
+          name: userUid
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /admin/billing:
     get:
       tags: [Admin]
@@ -6575,6 +6732,41 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/GenericSuccess'
+  /users/{uid}/2fa/reset:
+    post:
+      tags: [RBAC]
+      summary: Resetear 2FA de usuario tenant
+      description: Requiere permiso `users.manage`. Desactiva el 2FA del usuario indicado dentro del mismo tenant autenticado.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      responses:
+        '200':
+          description: 2FA reseteado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          uid:
+                            type: string
+                            format: uuid
+                          email:
+                            type: string
+                            format: email
+                          two_factor_enabled:
+                            type: boolean
+                            example: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: No autorizado
+        '404':
+          description: Usuario no encontrado
   /users/{uid}/access:
     get:
       description: >-
@@ -7651,6 +7843,38 @@ paths:
           $ref: '#/components/responses/GenericSuccess'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /admin/platform/users/{uid}/2fa/reset:
+    post:
+      tags: [Admin]
+      summary: Resetear 2FA de usuario de plataforma
+      description: Requiere superadmin global con permiso `admin.tenants.manage`.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      responses:
+        '200':
+          description: 2FA reseteado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          uid:
+                            type: string
+                            format: uuid
+                          two_factor_enabled:
+                            type: boolean
+                            example: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: No autorizado
+        '404':
+          description: Usuario de plataforma no encontrado
   /admin/platform/users/{uid}/roles:
     post:
       tags: [Admin]
@@ -7743,6 +7967,28 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/GenericSuccess'
+  /admin/tenants/{uid}/users/{userUid}/2fa/reset:
+    post:
+      tags: [Admin]
+      summary: Resetear 2FA de usuario de tenant
+      description: Requiere superadmin global con permiso `admin.tenants.manage`.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+        - in: path
+          name: userUid
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: No autorizado
+        '404':
+          description: Tenant o usuario no encontrado
   /projects:
     get:
       tags: [Projects]
@@ -8590,6 +8836,40 @@ components:
           type: string
           format: password
           example: '********'
+        two_factor_code:
+          type: string
+          nullable: true
+          example: '123456'
+        recovery_code:
+          type: string
+          nullable: true
+          example: ABCD-1234
+    AuthUser:
+      type: object
+      properties:
+        uid:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        tenant_uid:
+          type: string
+          format: uuid
+          nullable: true
+        is_platform_admin:
+          type: boolean
+        avatar_url:
+          type: string
+          nullable: true
+        two_factor_enabled:
+          type: boolean
+        locked_until:
+          type: string
+          format: date-time
+          nullable: true
     AccountRequest:
       type: object
       required: [name]

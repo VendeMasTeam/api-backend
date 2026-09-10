@@ -88,12 +88,14 @@ Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.sche
     Route::put('/me', [AuthController::class, 'updateMe']);
     Route::get('/auth/init', [AuthController::class, 'init']);
     Route::post('/2fa/recovery-codes/regenerate', [AuthController::class, 'regenerateRecoveryCodes']);
+    Route::delete('/2fa', [AuthController::class, 'disableTwoFactor']);
 
     Route::get('/users', [UserController::class, 'index'])->middleware('permission:users.manage');
     Route::get('/users/statuses', [StaticOptionController::class, 'userStatuses'])->middleware('permission:users.manage');
     Route::post('/users', [UserController::class, 'store'])->middleware('permission:users.manage');
     Route::get('/users/{uid}', [UserController::class, 'show'])->middleware('permission:users.manage');
     Route::put('/users/{uid}', [UserController::class, 'update'])->middleware('permission:users.manage');
+    Route::post('/users/{uid}/2fa/reset', [UserController::class, 'resetTwoFactor'])->middleware('permission:users.manage');
     Route::delete('/users/{uid}', [UserController::class, 'destroy'])->middleware('permission:users.manage');
     Route::get('/rbac/roles', [AccessControlController::class, 'roles'])->middleware('permission:users.manage');
     Route::post('/rbac/roles', [AccessControlController::class, 'storeRole'])->middleware('permission:users.manage');
@@ -602,6 +604,7 @@ Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('ad
         Route::post('/', [AdminTenantController::class, 'store'])->middleware('permission:admin.tenants.manage');
         Route::get('/{uid}', [AdminTenantController::class, 'show'])->middleware('permission:admin.tenants.manage');
         Route::put('/{uid}', [AdminTenantController::class, 'update'])->middleware('permission:admin.tenants.manage');
+        Route::delete('/{uid}', [AdminTenantController::class, 'destroy'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/suspend', [AdminTenantController::class, 'suspend'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/activate', [AdminTenantController::class, 'activate'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/archive', [AdminTenantController::class, 'archive'])->middleware('permission:admin.tenants.manage');
@@ -609,8 +612,11 @@ Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('ad
         Route::get('/{uid}/permissions', [AdminTenantController::class, 'permissions'])->middleware('permission:admin.tenants.manage');
         Route::get('/{uid}/users', [AdminTenantController::class, 'users'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/users', [AdminTenantController::class, 'createUser'])->middleware('permission:admin.tenants.manage');
+        Route::put('/{uid}/users/{userUid}', [AdminTenantController::class, 'updateUser'])->middleware('permission:admin.tenants.manage');
+        Route::delete('/{uid}/users/{userUid}', [AdminTenantController::class, 'destroyUser'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/users/{userUid}/lock', [AdminTenantController::class, 'lockUser'])->middleware('permission:admin.tenants.manage');
         Route::post('/{uid}/users/{userUid}/unlock', [AdminTenantController::class, 'unlockUser'])->middleware('permission:admin.tenants.manage');
+        Route::post('/{uid}/users/{userUid}/2fa/reset', [AdminTenantController::class, 'resetUserTwoFactor'])->middleware('permission:admin.tenants.manage');
     });
 
     Route::prefix('billing')->group(function () {
@@ -645,6 +651,7 @@ Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('ad
         Route::post('/users', [AdminPlatformUserController::class, 'store'])->middleware('platform.permission:admin.tenants.manage');
         Route::get('/users/{uid}', [AdminPlatformUserController::class, 'show'])->middleware('platform.permission:admin.tenants.manage');
         Route::put('/users/{uid}', [AdminPlatformUserController::class, 'update'])->middleware('platform.permission:admin.tenants.manage');
+        Route::post('/users/{uid}/2fa/reset', [AdminPlatformUserController::class, 'resetTwoFactor'])->middleware('platform.permission:admin.tenants.manage');
         Route::post('/users/{uid}/roles', [AdminPlatformUserController::class, 'assignRole'])->middleware('platform.permission:admin.tenants.manage');
         Route::delete('/users/{uid}/roles/{roleUid}', [AdminPlatformUserController::class, 'removeRole'])->middleware('platform.permission:admin.tenants.manage');
     });

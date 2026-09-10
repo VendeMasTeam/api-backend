@@ -96,4 +96,23 @@ class UserController extends Controller
             return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
         }
     }
+
+    public function resetTwoFactor(string $uid)
+    {
+        try {
+            $user = $this->userService->resetTwoFactor($uid);
+
+            if (!$user) {
+                return $this->errorResponse('Usuario no encontrado', 404);
+            }
+
+            return $this->successResponse([
+                'uid' => $user->uid,
+                'email' => $user->email,
+                'two_factor_enabled' => $user->hasTwoFactorEnabled(),
+            ], 200, '2FA reseteado correctamente');
+        } catch (\Exception $e) {
+            return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
+        }
+    }
 }

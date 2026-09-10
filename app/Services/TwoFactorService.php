@@ -92,6 +92,17 @@ class TwoFactorService
         return false;
     }
 
+    public function disableForUser(User $user): User
+    {
+        $user->forceFill([
+            'two_factor_secret' => null,
+            'two_factor_confirmed_at' => null,
+            'two_factor_recovery_codes' => null,
+        ])->save();
+
+        return $user->refresh();
+    }
+
     private function totp(string $secret, int $timeSlice): string
     {
         $secretKey = $this->base32Decode($secret);

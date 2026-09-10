@@ -12,6 +12,11 @@ use Illuminate\Validation\ValidationException;
 
 class AdminPlatformUserService
 {
+    public function __construct(
+        private readonly TwoFactorService $twoFactorService
+    ) {
+    }
+
     public function list(array $filters = [])
     {
         $query = User::query()
@@ -128,5 +133,12 @@ class AdminPlatformUserService
         $user->removeAdminRole($role);
 
         return $user->fresh()->load('adminRoles.permissions');
+    }
+
+    public function resetTwoFactor(string $uid): User
+    {
+        $user = $this->findByUid($uid);
+
+        return $this->twoFactorService->disableForUser($user)->fresh()->load('adminRoles.permissions');
     }
 }

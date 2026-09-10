@@ -285,6 +285,133 @@ class SuperAdminManagementTest extends TestCase
             ->assertJsonPath('data.estado', 'Activo');
     }
 
+    public function test_superadmin_can_update_tenant_user_profile_role_and_status(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.manage']);
+
+        $this->permission('dashboard.read', 'dashboard');
+        $tenant = $this->tenantWithPlan();
+        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+
+        $user = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Old Name',
+            'email' => 'old-user@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+        $seller = Role::withoutGlobalScopes()
+            ->where('tenant_id', $tenant->getKey())
+            ->where('key', 'seller')
+            ->firstOrFail();
+        $user->roles()->attach($seller->getKey());
+
+        $this->putJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $user->uid, [
+            'name' => 'New Name',
+            'email' => 'new-user@acme.com',
+            'role' => 'manager',
+            'is_active' => false,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'New Name')
+            ->assertJsonPath('data.email', 'new-user@acme.com')
+            ->assertJsonPath('data.rol', 'manager')
+            ->assertJsonPath('data.estado', 'Inactivo');
+
+        $this->assertNotNull($user->fresh()->locked_until);
+    }
+
+    public function test_superadmin_can_logically_delete_tenant_user(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.manage']);
+
+        $tenant = $this->tenantWithPlan();
+        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+
+        $owner = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Owner User',
+            'email' => 'owner-delete-guard@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+        $seller = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Seller User',
+            'email' => 'seller-delete@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+
+        $ownerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'owner')->firstOrFail();
+        $sellerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'seller')->firstOrFail();
+        $owner->roles()->attach($ownerRole->getKey());
+        $seller->roles()->attach($sellerRole->getKey());
+
+        $token = $seller->createToken('api-token')->accessToken;
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $seller->uid)
+            ->assertOk()
+            ->assertJsonPath('data.estado', 'Inactivo');
+
+        $this->assertNotNull($seller->fresh()->locked_until);
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'id' => $token->getKey(),
+        ]);
+    }
+
+    public function test_superadmin_cannot_delete_last_active_owner_from_tenant(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.manage']);
+
+        $tenant = $this->tenantWithPlan();
+        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+
+        $owner = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Only Owner',
+            'email' => 'only-owner@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+        $ownerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'owner')->firstOrFail();
+        $owner->roles()->attach($ownerRole->getKey());
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $owner->uid)
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.user.0', 'No puedes eliminar el ultimo owner activo del tenant');
+
+        $this->assertNull($owner->fresh()->locked_until);
+    }
+
+    public function test_superadmin_can_logically_delete_tenant_without_dropping_schema(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.manage']);
+
+        $tenant = $this->tenantWithPlan();
+        $tenant->forceFill([
+            'schema_name' => 'tenant_acme_corporation',
+            'schema_migrated_at' => now(),
+        ])->save();
+
+        $user = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Tenant User',
+            'email' => 'tenant-delete-user@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+        $token = $user->createToken('api-token')->accessToken;
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid)
+            ->assertOk()
+            ->assertJsonPath('data.estado', 'ARCHIVADO')
+            ->assertJsonPath('data.schema_name', 'tenant_acme_corporation');
+
+        $tenant->refresh();
+        $this->assertFalse($tenant->is_active);
+        $this->assertSame('ARCHIVADO', $tenant->status);
+        $this->assertNotNull($user->fresh()->locked_until);
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'id' => $token->getKey(),
+        ]);
+    }
+
     public function test_superadmin_can_archive_restore_and_read_tenant_expires_at(): void
     {
         $this->authenticateSuperadmin(['admin.tenants.manage']);

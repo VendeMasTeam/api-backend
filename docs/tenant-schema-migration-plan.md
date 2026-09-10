@@ -14,14 +14,15 @@ Separar los datos operativos de cada tenant en un schema PostgreSQL propio, mant
 
 - Agregar `tenants.schema_name`.
 - Bloquear nombres de tenant repetidos; el nombre comercial ahora es unico sin importar mayusculas/minusculas.
-- Provisionar schema vacio al crear tenant.
+- Provisionar schema al crear tenant.
 - Agregar comando para provisionar schemas de tenants existentes.
 - Mantener `TENANCY_MODE=shared`, sin cambiar runtime ni mover datos.
 
 Estado en codigo:
 
-- `TENANCY_MODE=shared` sigue siendo el valor recomendado.
+- `TENANCY_MODE=hybrid` es el valor recomendado para despliegue gradual en VPS.
 - `TenantSchemaService::createSchema()` crea el schema si la conexion es PostgreSQL.
+- `TenantSchemaService::bootstrapTenant()` crea schema, corre migraciones tenant, marca `schema_migrated_at` y permite provisionar datos base dentro del schema.
 - `TenantSchemaService::generateSchemaName()` genera schemas desde el nombre del tenant, por ejemplo `tenant_yeda10` o `tenant_tt_corporation`. Si el nombre sanitizado choca con un schema existente, agrega un sufijo corto del UID.
 - Existe un indice unico case-insensitive sobre `tenants.name` para impedir duplicados como `Acme` y `acme`.
 - `tenants:schemas:provision` permite generar/backfillear `schema_name` sin cambiar el runtime.
@@ -119,6 +120,7 @@ Estado en codigo:
 - `TENANCY_MODE=shared`: ningun tenant usa schema en runtime.
 - `TENANCY_MODE=hybrid`: solo tenants con `schema_migrated_at` usan schema.
 - `TENANCY_MODE=schema`: todos los tenants usan schema.
+- `POST /api/admin/tenants` ya ejecuta bootstrap automatico para nuevos tenants en PostgreSQL.
 - `tenants:schemas:activate TENANT_UID` marca el tenant como migrado.
 - `tenants:schemas:deactivate TENANT_UID` lo devuelve a modo shared cuando `TENANCY_MODE=hybrid`.
 
@@ -205,4 +207,167 @@ Si el dry-run esta correcto:
 
 ```bash
 php artisan tenants:schemas:copy-data TENANT_UID --tables=inventory_reservations,inventory_movements,credit_profiles,exchange_rates,credit_rules,financial_records,commission_rules,commission_entries,commission_plans,commission_plan_role,commission_assignments,commission_targets,commission_runs,commission_run_items,expense_categories,cost_centers,suppliers,expenses,purchase_orders,purchase_order_items,purchase_order_payments,purchase_order_receipts,purchase_order_receipt_items,partners,partner_opportunities,opportunity_conflicts,partner_resources,partner_access --execute
+```
+
+## Estado funcional actual
+
+La base de schema por tenant ya esta funcional:
+
+- Nuevos tenants pueden nacer con schema propio.
+- Las tablas tenant existen en `database/migrations/tenant`.
+- El runtime puede operar en modo `hybrid`.
+- Los tenants ya migrados se enrutan por `tenant.schema`.
+- Los tenants no migrados pueden seguir leyendo/escribiendo en `public` mientras `TENANCY_MODE=hybrid`.
+- `tenant_id` se mantiene dentro de tablas tenant para compatibilidad, auditoria y rollback.
+
+Lo que sigue no es cambiar rutas del frontend. El frontend sigue consumiendo `/api/...`; el backend resuelve el schema desde `token -> user -> tenant -> schema_name`.
+
+## Despliegue por etapas en VPS
+
+### Etapa 0 - Congelar y respaldar
+
+Antes de desplegar:
+
+```bash
+docker compose ps
+docker compose exec app php artisan about
+docker compose exec app php artisan route:list --path=api
+docker compose exec postgres pg_dump -U POSTGRES_USER -d vende_mas > backup_pre_schema.sql
+```
+
+Validar que el backup quedo creado y pesa mas de 0 bytes.
+
+### Etapa 1 - Subir codigo sin activar schemas
+
+Desplegar codigo nuevo, pero mantener:
+
+```env
+TENANCY_MODE=shared
+```
+
+Comandos:
+
+```bash
+git pull
+docker compose build app
+docker compose up -d
+docker compose exec app php artisan migrate --force
+docker compose exec app php artisan optimize:clear
+docker compose exec app php artisan config:cache
+docker compose exec app php artisan route:cache
+```
+
+Pruebas minimas:
+
+- Login superadmin.
+- Login tenant existente.
+- `GET /api/auth/init`.
+- Pipeline listado.
+- Productos listado.
+
+Si algo falla en esta etapa, el problema no es el cambio de schema runtime, porque todavia sigue `shared`.
+
+### Etapa 2 - Crear schemas sin mover runtime
+
+Crear schemas y correr migraciones tenant sin activar tenants:
+
+```bash
+docker compose exec app php artisan tenants:schemas:provision --tenant_uid=TENANT_UID
+docker compose exec app php artisan tenants:migrate --tenant_uid=TENANT_UID
+docker compose exec app php artisan tenants:schemas:verify TENANT_UID
+```
+
+En esta etapa el tenant todavia opera desde `public`.
+
+### Etapa 3 - Copiar datos por bloques
+
+Hacer primero dry-run por bloque:
+
+```bash
+docker compose exec app php artisan tenants:schemas:copy-data TENANT_UID --tables=accounts,contacts,crm_entities,relations,opportunity_stages,opportunities,tasks,activities
+docker compose exec app php artisan tenants:schemas:copy-data TENANT_UID --tables=inventory_categories,warehouses,inventory_products,inventory_stocks,products,price_books,price_book_items,quotations,quotation_items,invoices,payments,competitors,battlecards,lost_reasons
+docker compose exec app php artisan tenants:schemas:copy-data TENANT_UID --tables=product_versions,product_dependencies,custom_fields,custom_field_values,tags,taggables,documents,document_types,document_versions,alert_rules,document_alerts,projects,project_milestones,project_assignments,segments,teams,team_user,automation_rules,automation_assignment_rules
+docker compose exec app php artisan tenants:schemas:copy-data TENANT_UID --tables=inventory_reservations,inventory_movements,credit_profiles,exchange_rates,credit_rules,financial_records,commission_rules,commission_entries,commission_plans,commission_plan_role,commission_assignments,commission_targets,commission_runs,commission_run_items,expense_categories,cost_centers,suppliers,expenses,purchase_orders,purchase_order_items,purchase_order_payments,purchase_order_receipts,purchase_order_receipt_items,partners,partner_opportunities,opportunity_conflicts,partner_resources,partner_access
+```
+
+Si el dry-run esta correcto, repetir con `--execute`.
+
+### Etapa 4 - Activar solo un tenant piloto
+
+Cambiar VPS a:
+
+```env
+TENANCY_MODE=hybrid
+```
+
+Recrear cache:
+
+```bash
+docker compose exec app php artisan optimize:clear
+docker compose exec app php artisan config:cache
+docker compose exec app php artisan route:cache
+```
+
+Activar un solo tenant:
+
+```bash
+docker compose exec app php artisan tenants:schemas:activate TENANT_UID
+docker compose exec app php artisan tenants:schemas:verify TENANT_UID
+```
+
+Pruebas del tenant piloto:
+
+- Login owner.
+- `GET /api/auth/init`.
+- `GET /api/opportunities/board`.
+- Crear oportunidad.
+- Crear actividad/tarea desde oportunidad.
+- Listar productos.
+- Crear cotizacion.
+- Reservar stock.
+- Crear factura desde cotizacion.
+- Crear y asignar custom field.
+- Listar razones de perdida/competidores.
+
+### Etapa 5 - Migrar tenants restantes uno por uno
+
+Por cada tenant:
+
+```bash
+docker compose exec app php artisan tenants:schemas:provision --tenant_uid=TENANT_UID
+docker compose exec app php artisan tenants:migrate --tenant_uid=TENANT_UID
+docker compose exec app php artisan tenants:schemas:copy-data TENANT_UID --execute
+docker compose exec app php artisan tenants:schemas:activate TENANT_UID
+docker compose exec app php artisan tenants:schemas:verify TENANT_UID
+```
+
+Validar cada tenant antes de continuar con el siguiente.
+
+### Etapa 6 - Rollback rapido por tenant
+
+Mientras VPS este en `hybrid`, si un tenant falla:
+
+```bash
+docker compose exec app php artisan tenants:schemas:deactivate TENANT_UID
+docker compose exec app php artisan optimize:clear
+docker compose exec app php artisan config:cache
+```
+
+Ese tenant vuelve a usar `public` sin tocar los datos copiados en su schema.
+
+### Etapa 7 - Endurecimiento antes de schema global
+
+Antes de cambiar a `TENANCY_MODE=schema`, validar:
+
+- Todos los tenants tienen `schema_name` y `schema_migrated_at`.
+- `tenants:schemas:verify --all` no muestra tablas faltantes.
+- `tenants:schemas:verify --orphans` esta limpio.
+- Jobs y scheduler usan `TenantSchemaService::runForTenant()`.
+- Reportes superadmin que agregan datos operativos iteran por tenant o usan resumen global.
+- No hay 500/504 en flujos criticos durante varios dias.
+
+Solo despues de eso evaluar:
+
+```env
+TENANCY_MODE=schema
 ```

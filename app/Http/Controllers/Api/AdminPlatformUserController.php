@@ -67,4 +67,12 @@ class AdminPlatformUserController extends Controller
             return $this->errorResponse('Validation error', 422, $e->errors());
         }
     }
+
+    public function resetTwoFactor(string $uid)
+    {
+        return $this->successResponse([
+            'uid' => $this->service->resetTwoFactor($uid)->uid,
+            'two_factor_enabled' => false,
+        ], 200, '2FA reseteado correctamente');
+    }
 }

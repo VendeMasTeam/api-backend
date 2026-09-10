@@ -7,10 +7,12 @@ use App\Repositories\UserRepository;
 class UserService
 {
     protected $repo;
+    protected $twoFactorService;
 
-    public function __construct(UserRepository $repo)
+    public function __construct(UserRepository $repo, TwoFactorService $twoFactorService)
     {
         $this->repo = $repo;
+        $this->twoFactorService = $twoFactorService;
     }
 
     public function getAll(array $filters = [])
@@ -36,5 +38,16 @@ class UserService
     public function delete(string $uid)
     {
         return $this->repo->delete($uid);
+    }
+
+    public function resetTwoFactor(string $uid)
+    {
+        $user = $this->repo->findByUid($uid);
+
+        if (!$user) {
+            return null;
+        }
+
+        return $this->twoFactorService->disableForUser($user)->fresh(['roles', 'permissions']);
     }
 }

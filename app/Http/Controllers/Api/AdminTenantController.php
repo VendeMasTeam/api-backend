@@ -12,6 +12,7 @@ use App\Services\OpportunityStageProvisioner;
 use App\Services\PlanPermissionService;
 use App\Services\TenantRoleProvisioner;
 use App\Services\TenantSchemaService;
+use App\Services\TwoFactorService;
 use App\Support\ApiIndex;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
@@ -290,6 +291,36 @@ class AdminTenantController extends Controller
         return $this->successResponse($this->serializeTenant($tenant->fresh('plan')), 200, 'Tenant archivado');
     }
 
+    public function destroy(string $uid)
+    {
+        $tenant = Tenant::query()->where('uid', $uid)->first();
+
+        if (!$tenant) {
+            return $this->errorResponse('Tenant no encontrado', 404);
+        }
+
+        DB::transaction(function () use ($tenant) {
+            User::withoutGlobalScopes()
+                ->where('tenant_id', $tenant->getKey())
+                ->get()
+                ->each(function (User $user) {
+                    $user->tokens()->delete();
+                    $user->forceFill([
+                        'locked_until' => now()->addYears(100),
+                        'failed_login_attempts' => 0,
+                    ])->save();
+                });
+
+            $tenant->forceFill([
+                'status' => 'ARCHIVADO',
+                'is_active' => false,
+                'expires_at' => now(),
+            ])->save();
+        });
+
+        return $this->successResponse($this->serializeTenant($tenant->fresh('plan')), 200, 'Tenant eliminado');
+    }
+
     public function restore(string $uid)
     {
         $tenant = Tenant::query()->where('uid', $uid)->first();
@@ -374,6 +405,8 @@ class AdminTenantController extends Controller
     {
         $validated = Validator::make($request->query(), [
             'role' => 'nullable|string|in:owner,manager,seller',
+            'search' => 'nullable|string|max:255',
+            'estado' => 'nullable|string|in:ACTIVO,INACTIVO,active,inactive',
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:100',
         ])->validate();
@@ -387,6 +420,26 @@ class AdminTenantController extends Controller
         $users = User::withoutGlobalScopes()
             ->with(['roles' => fn ($query) => $query->withoutGlobalScopes()])
             ->where('tenant_id', $tenant->getKey())
+            ->when(!empty($validated['search']), function ($query) use ($validated) {
+                $search = $validated['search'];
+
+                $query->where(function ($builder) use ($search) {
+                    $builder
+                        ->where('name', 'like', '%' . $search . '%')
+                        ->orWhere('email', 'like', '%' . $search . '%');
+                });
+            })
+            ->when(!empty($validated['estado']), function ($query) use ($validated) {
+                if (in_array($validated['estado'], ['ACTIVO', 'active'], true)) {
+                    $query->where(function ($builder) {
+                        $builder->whereNull('locked_until')->orWhere('locked_until', '<=', now());
+                    });
+                }
+
+                if (in_array($validated['estado'], ['INACTIVO', 'inactive'], true)) {
+                    $query->where('locked_until', '>', now());
+                }
+            })
             ->when(!empty($validated['role']), function ($query) use ($validated, $tenant) {
                 $query->whereHas('roles', function ($roleQuery) use ($validated, $tenant) {
                     $roleQuery
@@ -410,6 +463,123 @@ class AdminTenantController extends Controller
         );
 
         return $this->successResponse($users);
+    }
+
+    public function updateUser(Request $request, string $uid, string $userUid, TenantRoleProvisioner $roleProvisioner)
+    {
+        try {
+            $tenant = Tenant::query()->where('uid', $uid)->first();
+
+            if (!$tenant) {
+                return $this->errorResponse('Tenant no encontrado', 404);
+            }
+
+            $user = $this->findTenantUser($tenant, $userUid);
+
+            if (!$user) {
+                return $this->errorResponse('Usuario no encontrado', 404);
+            }
+
+            $validated = $request->validate([
+                'name' => 'sometimes|string|max:255',
+                'email' => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($user->id)],
+                'password' => 'sometimes|nullable|string|min:8',
+                'role' => 'sometimes|string|in:owner,manager,seller',
+                'is_active' => 'sometimes|boolean',
+                'active' => 'sometimes|boolean',
+                'status' => 'sometimes|string|in:ACTIVO,INACTIVO,active,inactive',
+            ]);
+
+            $willDeactivate = $this->payloadDeactivatesUser($validated);
+            $willRemoveOwnerRole = array_key_exists('role', $validated)
+                && $user->roles->first()?->key === 'owner'
+                && $validated['role'] !== 'owner';
+
+            if (($willDeactivate || $willRemoveOwnerRole) && $this->isLastActiveOwner($tenant, $user)) {
+                return $this->errorResponse('Validation error', 422, [
+                    'user' => ['No puedes dejar el tenant sin un owner activo'],
+                ]);
+            }
+
+            DB::transaction(function () use ($tenant, $user, $validated, $roleProvisioner) {
+                $payload = [];
+
+                foreach (['name', 'email'] as $field) {
+                    if (array_key_exists($field, $validated)) {
+                        $payload[$field] = $validated[$field];
+                    }
+                }
+
+                if (!empty($validated['password'])) {
+                    $payload['password'] = Hash::make($validated['password']);
+                    $payload['failed_login_attempts'] = 0;
+                    $payload['locked_until'] = null;
+                }
+
+                if ($this->payloadActivatesUser($validated)) {
+                    $payload['locked_until'] = null;
+                    $payload['failed_login_attempts'] = 0;
+                }
+
+                if ($this->payloadDeactivatesUser($validated)) {
+                    $payload['locked_until'] = now()->addYears(100);
+                }
+
+                if ($payload !== []) {
+                    $user->forceFill($payload)->save();
+                }
+
+                if (array_key_exists('role', $validated)) {
+                    $roleProvisioner->provision($tenant);
+
+                    $role = Role::withoutGlobalScopes()
+                        ->where('tenant_id', $tenant->getKey())
+                        ->where('key', $validated['role'])
+                        ->firstOrFail();
+
+                    $user->roles()->sync([$role->getKey()]);
+                }
+
+                if ($this->payloadDeactivatesUser($validated)) {
+                    $user->tokens()->delete();
+                }
+            });
+
+            return $this->successResponse($this->serializeTenantUser($this->freshTenantUser($user)), 200, 'Usuario actualizado');
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        } catch (\Throwable $e) {
+            return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
+        }
+    }
+
+    public function destroyUser(string $uid, string $userUid)
+    {
+        $tenant = Tenant::query()->where('uid', $uid)->first();
+
+        if (!$tenant) {
+            return $this->errorResponse('Tenant no encontrado', 404);
+        }
+
+        $user = $this->findTenantUser($tenant, $userUid);
+
+        if (!$user) {
+            return $this->errorResponse('Usuario no encontrado', 404);
+        }
+
+        if ($this->isLastActiveOwner($tenant, $user)) {
+            return $this->errorResponse('Validation error', 422, [
+                'user' => ['No puedes eliminar el ultimo owner activo del tenant'],
+            ]);
+        }
+
+        $user->tokens()->delete();
+        $user->forceFill([
+            'locked_until' => now()->addYears(100),
+            'failed_login_attempts' => 0,
+        ])->save();
+
+        return $this->successResponse($this->serializeTenantUser($this->freshTenantUser($user)), 200, 'Usuario eliminado');
     }
 
     private function sendTenantUserResetEmailAfterResponse(User $user, Tenant $tenant): bool
@@ -467,7 +637,7 @@ class AdminTenantController extends Controller
             'locked_until' => now()->addYears(100),
         ]);
 
-        return $this->successResponse($this->serializeTenantUser($user->fresh(['roles'])), 200, 'Usuario bloqueado');
+        return $this->successResponse($this->serializeTenantUser($this->freshTenantUser($user)), 200, 'Usuario bloqueado');
     }
 
     public function unlockUser(string $uid, string $userUid)
@@ -489,7 +659,26 @@ class AdminTenantController extends Controller
             'failed_login_attempts' => 0,
         ]);
 
-        return $this->successResponse($this->serializeTenantUser($user->fresh(['roles'])), 200, 'Usuario desbloqueado');
+        return $this->successResponse($this->serializeTenantUser($this->freshTenantUser($user)), 200, 'Usuario desbloqueado');
+    }
+
+    public function resetUserTwoFactor(string $uid, string $userUid, TwoFactorService $twoFactorService)
+    {
+        $tenant = Tenant::query()->where('uid', $uid)->first();
+
+        if (!$tenant) {
+            return $this->errorResponse('Tenant no encontrado', 404);
+        }
+
+        $user = $this->findTenantUser($tenant, $userUid);
+
+        if (!$user) {
+            return $this->errorResponse('Usuario no encontrado', 404);
+        }
+
+        $user = $this->freshTenantUser($twoFactorService->disableForUser($user));
+
+        return $this->successResponse($this->serializeTenantUser($user), 200, '2FA reseteado correctamente');
     }
 
     public function permissions(Request $request, string $uid, PlanPermissionService $planPermissionService)
@@ -561,6 +750,7 @@ class AdminTenantController extends Controller
             'rol' => $user->roles->first()?->key,
             'ultimo_acceso' => $user->last_login_at?->toISOString(),
             'estado' => $user->isLocked() ? 'Inactivo' : 'Activo',
+            'two_factor_enabled' => $user->hasTwoFactorEnabled(),
         ];
     }
 
@@ -572,6 +762,49 @@ class AdminTenantController extends Controller
             ->where('uid', $userUid)
             ->where('is_platform_admin', false)
             ->first();
+    }
+
+    private function freshTenantUser(User $user): User
+    {
+        return User::withoutGlobalScopes()
+            ->with(['roles' => fn ($query) => $query->withoutGlobalScopes()])
+            ->whereKey($user->getKey())
+            ->firstOrFail();
+    }
+
+    private function payloadActivatesUser(array $payload): bool
+    {
+        return ($payload['is_active'] ?? null) === true
+            || ($payload['active'] ?? null) === true
+            || in_array($payload['status'] ?? null, ['ACTIVO', 'active'], true);
+    }
+
+    private function payloadDeactivatesUser(array $payload): bool
+    {
+        return ($payload['is_active'] ?? null) === false
+            || ($payload['active'] ?? null) === false
+            || in_array($payload['status'] ?? null, ['INACTIVO', 'inactive'], true);
+    }
+
+    private function isLastActiveOwner(Tenant $tenant, User $user): bool
+    {
+        if ($user->roles->first()?->key !== 'owner' || $user->isLocked()) {
+            return false;
+        }
+
+        return User::withoutGlobalScopes()
+            ->where('tenant_id', $tenant->getKey())
+            ->where('is_platform_admin', false)
+            ->where(function ($query) {
+                $query->whereNull('locked_until')->orWhere('locked_until', '<=', now());
+            })
+            ->whereHas('roles', function ($query) use ($tenant) {
+                $query
+                    ->withoutGlobalScopes()
+                    ->where('tenant_id', $tenant->getKey())
+                    ->where('key', 'owner');
+            })
+            ->count() <= 1;
     }
 
     private function tenantNameExists(string $name, ?int $ignoreTenantId = null): bool
