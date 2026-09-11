@@ -21,12 +21,25 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AdminTenantController extends Controller
 {
+    private const USER_REFERENCE_COLUMNS = [
+        'owner_user_id',
+        'created_by_user_id',
+        'assigned_user_id',
+        'assigned_to_user_id',
+        'manager_user_id',
+        'uploaded_by_user_id',
+        'reserved_by_user_id',
+        'performed_by_user_id',
+        'actor_user_id',
+    ];
+
     public function index(Request $request)
     {
         $validated = Validator::make($request->query(), [
@@ -322,6 +335,79 @@ class AdminTenantController extends Controller
         return $this->successResponse($this->serializeTenant($tenant->fresh('plan')), 200, 'Tenant eliminado');
     }
 
+    public function purge(Request $request, string $uid, TenantSchemaService $tenantSchemaService)
+    {
+        try {
+            $tenant = Tenant::query()->where('uid', $uid)->first();
+
+            if (!$tenant) {
+                return $this->errorResponse('Tenant no encontrado', 404);
+            }
+
+            $validated = $request->validate([
+                'confirmation' => 'required|string|max:255',
+                'delete_schema' => 'sometimes|boolean',
+            ]);
+
+            if (trim($validated['confirmation']) !== $tenant->name) {
+                return $this->errorResponse('Validation error', 422, [
+                    'confirmation' => ['La confirmacion debe coincidir exactamente con el nombre del tenant'],
+                ]);
+            }
+
+            $tenantId = $tenant->getKey();
+            $tenantUid = $tenant->uid;
+            $schemaName = $tenant->schema_name;
+            $deleteSchema = $validated['delete_schema'] ?? true;
+
+            $summary = DB::transaction(function () use ($tenant, $tenantId, $tenantSchemaService, $deleteSchema) {
+                $tenantSchemaService->resetSearchPath();
+
+                $userIds = User::withoutGlobalScopes()
+                    ->where('tenant_id', $tenantId)
+                    ->pluck('id')
+                    ->all();
+
+                $supportTokenIds = $this->supportTokenIdsForTenant($tenantId);
+                $deletedSupportTokens = $this->deleteTokensByIds($supportTokenIds);
+                $deletedTenantTokens = $this->deleteUserTokens($userIds);
+                $deletedSupportSessions = $this->deleteWhere('support_sessions', 'tenant_id', $tenantId);
+                $deletedSharedRows = $this->deleteTenantRowsFromSharedTables($tenant);
+
+                $this->deleteUserPivots($userIds);
+
+                $deletedRoles = $this->deleteWhere('roles', 'tenant_id', $tenantId);
+                $deletedUsers = User::withoutGlobalScopes()->whereIn('id', $userIds)->delete();
+
+                if ($deleteSchema) {
+                    $tenantSchemaService->dropSchema($tenant, true);
+                }
+
+                $tenant->delete();
+
+                return [
+                    'tenant_users_deleted' => $deletedUsers,
+                    'tenant_roles_deleted' => $deletedRoles,
+                    'tenant_user_tokens_deleted' => $deletedTenantTokens,
+                    'support_sessions_deleted' => $deletedSupportSessions,
+                    'support_tokens_deleted' => $deletedSupportTokens,
+                    'shared_rows_deleted' => $deletedSharedRows,
+                    'schema_deleted' => (bool) $deleteSchema,
+                ];
+            });
+
+            return $this->successResponse([
+                'uid' => $tenantUid,
+                'schema_name' => $schemaName,
+                ...$summary,
+            ], 200, 'Tenant eliminado definitivamente');
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        } catch (\Throwable $e) {
+            return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
+        }
+    }
+
     public function restore(string $uid)
     {
         $tenant = Tenant::query()->where('uid', $uid)->first();
@@ -581,6 +667,74 @@ class AdminTenantController extends Controller
         ])->save();
 
         return $this->successResponse($this->serializeTenantUser($this->freshTenantUser($user)), 200, 'Usuario eliminado');
+    }
+
+    public function purgeUser(Request $request, string $uid, string $userUid, TenantSchemaService $tenantSchemaService)
+    {
+        try {
+            $tenant = Tenant::query()->where('uid', $uid)->first();
+
+            if (!$tenant) {
+                return $this->errorResponse('Tenant no encontrado', 404);
+            }
+
+            $user = $this->findTenantUser($tenant, $userUid);
+
+            if (!$user) {
+                return $this->errorResponse('Usuario no encontrado', 404);
+            }
+
+            $validated = $request->validate([
+                'confirmation' => 'required|string|max:255',
+            ]);
+
+            if (trim($validated['confirmation']) !== $user->email) {
+                return $this->errorResponse('Validation error', 422, [
+                    'confirmation' => ['La confirmacion debe coincidir exactamente con el email del usuario'],
+                ]);
+            }
+
+            if ($this->isLastActiveOwner($tenant, $user)) {
+                return $this->errorResponse('Validation error', 422, [
+                    'user' => ['No puedes eliminar definitivamente el ultimo owner activo del tenant'],
+                ]);
+            }
+
+            $summary = DB::transaction(function () use ($tenant, $user, $tenantSchemaService) {
+                $tenantSchemaService->resetSearchPath();
+
+                $tokensDeleted = $this->deleteUserTokens([$user->getKey()]);
+                $supportSessionsDeleted = $this->deleteSupportSessionsForUser($user->getKey());
+                $pivotsDeleted = $this->deleteUserPivots([$user->getKey()]);
+                $publicReferencesCleared = $this->clearPublicUserReferences($tenant, $user->getKey());
+                $schemaReferencesCleared = $this->clearTenantSchemaUserReferences($tenant, $user->getKey());
+
+                User::withoutGlobalScopes()
+                    ->where('tenant_id', $tenant->getKey())
+                    ->where('manager_id', $user->getKey())
+                    ->update(['manager_id' => null]);
+
+                $user->delete();
+
+                return [
+                    'tokens_deleted' => $tokensDeleted,
+                    'support_sessions_deleted' => $supportSessionsDeleted,
+                    'pivot_rows_deleted' => $pivotsDeleted,
+                    'public_references_cleared' => $publicReferencesCleared,
+                    'schema_references_cleared' => $schemaReferencesCleared,
+                ];
+            });
+
+            return $this->successResponse([
+                'uid' => $userUid,
+                'email' => $user->email,
+                ...$summary,
+            ], 200, 'Usuario eliminado definitivamente');
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        } catch (\Throwable $e) {
+            return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
+        }
     }
 
     private function sendTenantUserResetEmailAfterResponse(User $user, Tenant $tenant): bool
@@ -861,5 +1015,223 @@ class AdminTenantController extends Controller
         }
 
         return $query->exists();
+    }
+
+    private function deleteTenantRowsFromSharedTables(Tenant $tenant): array
+    {
+        $deleted = [];
+
+        foreach (array_reverse(config('tenancy.tenant_tables', [])) as $table) {
+            if (! $this->publicTableHasColumn($table, 'tenant_id')) {
+                continue;
+            }
+
+            $count = DB::table($table)->where('tenant_id', $tenant->getKey())->delete();
+
+            if ($count > 0) {
+                $deleted[$table] = $count;
+            }
+        }
+
+        return $deleted;
+    }
+
+    private function clearPublicUserReferences(Tenant $tenant, int $userId): array
+    {
+        $cleared = [];
+
+        foreach (config('tenancy.tenant_tables', []) as $table) {
+            if (! $this->publicTableHasColumn($table, 'tenant_id')) {
+                continue;
+            }
+
+            foreach (self::USER_REFERENCE_COLUMNS as $column) {
+                if (! $this->publicTableHasColumn($table, $column) || ! $this->publicColumnIsNullable($table, $column)) {
+                    continue;
+                }
+
+                $count = DB::table($table)
+                    ->where('tenant_id', $tenant->getKey())
+                    ->where($column, $userId)
+                    ->update([$column => null]);
+
+                if ($count > 0) {
+                    $cleared[$table][$column] = $count;
+                }
+            }
+        }
+
+        return $cleared;
+    }
+
+    private function clearTenantSchemaUserReferences(Tenant $tenant, int $userId): array
+    {
+        if (DB::getDriverName() !== 'pgsql' || ! $tenant->schema_name) {
+            return [];
+        }
+
+        $cleared = [];
+
+        foreach (config('tenancy.tenant_tables', []) as $table) {
+            if (! $this->schemaTableHasColumn($tenant->schema_name, $table, 'tenant_id')) {
+                continue;
+            }
+
+            foreach (self::USER_REFERENCE_COLUMNS as $column) {
+                if (
+                    ! $this->schemaTableHasColumn($tenant->schema_name, $table, $column)
+                    || ! $this->schemaColumnIsNullable($tenant->schema_name, $table, $column)
+                ) {
+                    continue;
+                }
+
+                $count = DB::table(DB::raw($this->qualifiedTable($tenant->schema_name, $table)))
+                    ->where('tenant_id', $tenant->getKey())
+                    ->where($column, $userId)
+                    ->update([$column => null]);
+
+                if ($count > 0) {
+                    $cleared[$table][$column] = $count;
+                }
+            }
+        }
+
+        return $cleared;
+    }
+
+    private function deleteUserPivots(array $userIds): int
+    {
+        if ($userIds === []) {
+            return 0;
+        }
+
+        $deleted = 0;
+
+        foreach (['role_user', 'permission_user', 'admin_role_user'] as $table) {
+            if (Schema::hasTable($table) && Schema::hasColumn($table, 'user_id')) {
+                $deleted += DB::table($table)->whereIn('user_id', $userIds)->delete();
+            }
+        }
+
+        return $deleted;
+    }
+
+    private function deleteSupportSessionsForUser(int $userId): int
+    {
+        if (! Schema::hasTable('support_sessions')) {
+            return 0;
+        }
+
+        $tokenIds = DB::table('support_sessions')
+            ->where('support_user_id', $userId)
+            ->orWhere('impersonated_user_id', $userId)
+            ->pluck('token_id')
+            ->filter()
+            ->all();
+
+        $this->deleteTokensByIds($tokenIds);
+
+        return DB::table('support_sessions')
+            ->where('support_user_id', $userId)
+            ->orWhere('impersonated_user_id', $userId)
+            ->delete();
+    }
+
+    private function supportTokenIdsForTenant(int $tenantId): array
+    {
+        if (! Schema::hasTable('support_sessions')) {
+            return [];
+        }
+
+        return DB::table('support_sessions')
+            ->where('tenant_id', $tenantId)
+            ->pluck('token_id')
+            ->filter()
+            ->all();
+    }
+
+    private function deleteUserTokens(array $userIds): int
+    {
+        if ($userIds === [] || ! Schema::hasTable('personal_access_tokens')) {
+            return 0;
+        }
+
+        return DB::table('personal_access_tokens')
+            ->where('tokenable_type', User::class)
+            ->whereIn('tokenable_id', $userIds)
+            ->delete();
+    }
+
+    private function deleteTokensByIds(array $tokenIds): int
+    {
+        if ($tokenIds === [] || ! Schema::hasTable('personal_access_tokens')) {
+            return 0;
+        }
+
+        return DB::table('personal_access_tokens')->whereIn('id', $tokenIds)->delete();
+    }
+
+    private function deleteWhere(string $table, string $column, mixed $value): int
+    {
+        if (! Schema::hasTable($table) || ! Schema::hasColumn($table, $column)) {
+            return 0;
+        }
+
+        return DB::table($table)->where($column, $value)->delete();
+    }
+
+    private function publicTableHasColumn(string $table, string $column): bool
+    {
+        return Schema::hasTable($table) && Schema::hasColumn($table, $column);
+    }
+
+    private function publicColumnIsNullable(string $table, string $column): bool
+    {
+        if (DB::getDriverName() === 'pgsql') {
+            return $this->schemaColumnIsNullable('public', $table, $column);
+        }
+
+        return true;
+    }
+
+    private function schemaTableHasColumn(string $schema, string $table, string $column): bool
+    {
+        $result = DB::selectOne(
+            'select exists (
+                select 1
+                from information_schema.columns
+                where table_schema = ?
+                  and table_name = ?
+                  and column_name = ?
+            ) as exists',
+            [$schema, $table, $column]
+        );
+
+        return (bool) ($result?->exists ?? false);
+    }
+
+    private function schemaColumnIsNullable(string $schema, string $table, string $column): bool
+    {
+        $result = DB::selectOne(
+            'select is_nullable
+             from information_schema.columns
+             where table_schema = ?
+               and table_name = ?
+               and column_name = ?
+             limit 1',
+            [$schema, $table, $column]
+        );
+
+        return strtoupper((string) ($result?->is_nullable ?? 'NO')) === 'YES';
+    }
+
+    private function qualifiedTable(string $schema, string $table): string
+    {
+        return $this->quoteIdentifier($schema).'.'.$this->quoteIdentifier($table);
+    }
+
+    private function quoteIdentifier(string $identifier): string
+    {
+        return '"'.str_replace('"', '""', $identifier).'"';
     }
 }

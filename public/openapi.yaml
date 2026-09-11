@@ -313,6 +313,34 @@ paths:
                 $ref: '#/components/schemas/AdminTenantEnvelope'
         '404':
           description: Tenant no encontrado
+  /admin/tenants/{uid}/purge:
+    delete:
+      tags: [Admin]
+      summary: Eliminar definitivamente tenant
+      description: Borrado fisico irreversible por solicitud legal. Requiere permiso `admin.tenants.purge` y confirmacion exacta con el nombre del tenant.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation:
+                  type: string
+                  example: Acme Corporation
+                delete_schema:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '403':
+          description: No autorizado
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /admin/tenants/{uid}/activate:
     post:
       tags: [Admin]
@@ -458,6 +486,38 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/GenericSuccess'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/tenants/{uid}/users/{userUid}/purge:
+    delete:
+      tags: [Admin]
+      summary: Eliminar definitivamente usuario de tenant
+      description: Borrado fisico irreversible de la cuenta de usuario. Requiere permiso `admin.tenants.purge` y confirmacion exacta con el email del usuario.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+        - in: path
+          name: userUid
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation:
+                  type: string
+                  format: email
+                  example: usuario@empresa.com
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '403':
+          description: No autorizado
         '422':
           $ref: '#/components/responses/ValidationError'
   /admin/tenants/{uid}/support-login:

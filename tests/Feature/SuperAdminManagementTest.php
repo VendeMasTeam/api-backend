@@ -412,6 +412,123 @@ class SuperAdminManagementTest extends TestCase
         ]);
     }
 
+    public function test_superadmin_can_purge_tenant_with_confirmation(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $tenant = $this->tenantWithPlan();
+        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+
+        $user = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Tenant User',
+            'email' => 'tenant-purge-user@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+
+        $role = Role::withoutGlobalScopes()
+            ->where('tenant_id', $tenant->getKey())
+            ->where('key', 'owner')
+            ->firstOrFail();
+
+        $user->roles()->attach($role->getKey());
+        $token = $user->createToken('api-token')->accessToken;
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/purge', [
+            'confirmation' => $tenant->name,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.uid', $tenant->uid)
+            ->assertJsonPath('data.schema_deleted', true);
+
+        $this->assertDatabaseMissing('tenants', ['id' => $tenant->getKey()]);
+        $this->assertDatabaseMissing('users', ['id' => $user->getKey()]);
+        $this->assertDatabaseMissing('roles', ['id' => $role->getKey()]);
+        $this->assertDatabaseMissing('role_user', ['user_id' => $user->getKey()]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $token->getKey()]);
+    }
+
+    public function test_superadmin_cannot_purge_tenant_without_exact_confirmation(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $tenant = $this->tenantWithPlan();
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/purge', [
+            'confirmation' => 'Acme',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.confirmation.0', 'La confirmacion debe coincidir exactamente con el nombre del tenant');
+
+        $this->assertDatabaseHas('tenants', ['id' => $tenant->getKey()]);
+    }
+
+    public function test_superadmin_can_purge_tenant_user_with_confirmation(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $tenant = $this->tenantWithPlan();
+        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+
+        $owner = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Owner User',
+            'email' => 'owner-purge-guard@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+        $seller = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Seller User',
+            'email' => 'seller-purge@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+
+        $ownerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'owner')->firstOrFail();
+        $sellerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'seller')->firstOrFail();
+        $owner->roles()->attach($ownerRole->getKey());
+        $seller->roles()->attach($sellerRole->getKey());
+
+        $token = $seller->createToken('api-token')->accessToken;
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $seller->uid . '/purge', [
+            'confirmation' => $seller->email,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.uid', $seller->uid)
+            ->assertJsonPath('data.email', $seller->email);
+
+        $this->assertDatabaseMissing('users', ['id' => $seller->getKey()]);
+        $this->assertDatabaseMissing('role_user', ['user_id' => $seller->getKey()]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $token->getKey()]);
+        $this->assertDatabaseHas('users', ['id' => $owner->getKey()]);
+    }
+
+    public function test_superadmin_cannot_purge_last_active_owner_from_tenant(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $tenant = $this->tenantWithPlan();
+        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+
+        $owner = User::withoutGlobalScopes()->create([
+            'tenant_id' => $tenant->getKey(),
+            'name' => 'Only Owner',
+            'email' => 'only-owner-purge@acme.com',
+            'password' => bcrypt('secret123'),
+        ]);
+
+        $ownerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'owner')->firstOrFail();
+        $owner->roles()->attach($ownerRole->getKey());
+
+        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $owner->uid . '/purge', [
+            'confirmation' => $owner->email,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.user.0', 'No puedes eliminar definitivamente el ultimo owner activo del tenant');
+
+        $this->assertDatabaseHas('users', ['id' => $owner->getKey()]);
+    }
+
     public function test_superadmin_can_archive_restore_and_read_tenant_expires_at(): void
     {
         $this->authenticateSuperadmin(['admin.tenants.manage']);

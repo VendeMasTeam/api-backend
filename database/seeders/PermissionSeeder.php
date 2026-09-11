@@ -76,6 +76,7 @@ class PermissionSeeder extends Seeder
             ['key' => 'admin.dashboard.read', 'module' => 'admin', 'action' => 'dashboard.read', 'description' => 'Ver dashboard global de plataforma'],
             ['key' => 'admin.tenants.manage', 'module' => 'admin', 'action' => 'tenants.manage', 'description' => 'Administrar tenants desde superadmin'],
             ['key' => 'admin.tenants.support', 'module' => 'admin', 'action' => 'tenants.support', 'description' => 'Ingresar a tenants en modo soporte de solo lectura'],
+            ['key' => 'admin.tenants.purge', 'module' => 'admin', 'action' => 'tenants.purge', 'description' => 'Eliminar definitivamente tenants y usuarios por solicitud legal'],
             ['key' => 'admin.billing.manage', 'module' => 'admin', 'action' => 'billing.manage', 'description' => 'Administrar facturacion global'],
             ['key' => 'admin.telemetry.read', 'module' => 'admin', 'action' => 'telemetry.read', 'description' => 'Ver telemetria global'],
             ['key' => 'admin.alerts.manage', 'module' => 'admin', 'action' => 'alerts.manage', 'description' => 'Administrar alertas globales'],

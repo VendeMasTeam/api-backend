@@ -548,6 +548,7 @@ Artisan::command('superadmin:create {email} {--name=Platform Superadmin} {--pass
             'plans.manage',
             'admin.dashboard.read',
             'admin.tenants.manage',
+            'admin.tenants.purge',
             'admin.billing.manage',
             'admin.telemetry.read',
             'admin.alerts.manage',

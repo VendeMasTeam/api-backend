@@ -39,6 +39,7 @@ class PlatformSuperadminSeeder extends Seeder
                 'plans.manage',
                 'admin.dashboard.read',
                 'admin.tenants.manage',
+                'admin.tenants.purge',
                 'admin.billing.manage',
                 'admin.telemetry.read',
                 'admin.alerts.manage',
