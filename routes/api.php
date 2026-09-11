@@ -658,6 +658,9 @@ Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('ad
         Route::get('/users/{uid}', [AdminPlatformUserController::class, 'show'])->middleware('platform.permission:admin.tenants.manage');
         Route::put('/users/{uid}', [AdminPlatformUserController::class, 'update'])->middleware('platform.permission:admin.tenants.manage');
         Route::post('/users/{uid}/2fa/reset', [AdminPlatformUserController::class, 'resetTwoFactor'])->middleware('platform.permission:admin.tenants.manage');
+        Route::post('/users/{uid}/lock', [AdminPlatformUserController::class, 'lock'])->middleware('platform.permission:admin.tenants.purge');
+        Route::post('/users/{uid}/unlock', [AdminPlatformUserController::class, 'unlock'])->middleware('platform.permission:admin.tenants.purge');
+        Route::delete('/users/{uid}/purge', [AdminPlatformUserController::class, 'purge'])->middleware('platform.permission:admin.tenants.purge');
         Route::post('/users/{uid}/roles', [AdminPlatformUserController::class, 'assignRole'])->middleware('platform.permission:admin.tenants.manage');
         Route::delete('/users/{uid}/roles/{roleUid}', [AdminPlatformUserController::class, 'removeRole'])->middleware('platform.permission:admin.tenants.manage');
     });

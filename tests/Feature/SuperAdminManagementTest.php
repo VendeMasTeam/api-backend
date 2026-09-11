@@ -89,6 +89,98 @@ class SuperAdminManagementTest extends TestCase
             ->assertJsonPath('data.key', 'soporte_plataforma_2');
     }
 
+    public function test_superadmin_can_lock_and_unlock_platform_user(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $target = User::withoutGlobalScopes()->create([
+            'name' => 'Platform Support',
+            'email' => 'platform-support@example.test',
+            'password' => bcrypt('secret123'),
+            'tenant_id' => null,
+            'is_platform_admin' => true,
+        ]);
+        $token = $target->createToken('api-token')->accessToken;
+
+        $this->postJson('/api/admin/platform/users/' . $target->uid . '/lock')
+            ->assertOk()
+            ->assertJsonPath('message', 'Usuario de plataforma desactivado')
+            ->assertJsonPath('data.status', 'INACTIVO');
+
+        $this->assertNotNull($target->fresh()->locked_until);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $token->getKey()]);
+
+        $this->postJson('/api/admin/platform/users/' . $target->uid . '/unlock')
+            ->assertOk()
+            ->assertJsonPath('message', 'Usuario de plataforma activado')
+            ->assertJsonPath('data.status', 'ACTIVO');
+
+        $this->assertNull($target->fresh()->locked_until);
+    }
+
+    public function test_superadmin_can_purge_platform_user_with_email_confirmation(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $target = User::withoutGlobalScopes()->create([
+            'name' => 'Platform Support',
+            'email' => 'platform-purge@example.test',
+            'password' => bcrypt('secret123'),
+            'tenant_id' => null,
+            'is_platform_admin' => true,
+        ]);
+        $token = $target->createToken('api-token')->accessToken;
+
+        $this->deleteJson('/api/admin/platform/users/' . $target->uid . '/purge', [
+            'confirmation' => $target->email,
+        ])
+            ->assertOk()
+            ->assertJsonPath('message', 'Usuario de plataforma eliminado definitivamente')
+            ->assertJsonPath('data.uid', $target->uid)
+            ->assertJsonPath('data.email', $target->email);
+
+        $this->assertDatabaseMissing('users', ['id' => $target->getKey()]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $token->getKey()]);
+    }
+
+    public function test_superadmin_cannot_purge_platform_user_without_exact_confirmation(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $target = User::withoutGlobalScopes()->create([
+            'name' => 'Platform Support',
+            'email' => 'platform-confirm@example.test',
+            'password' => bcrypt('secret123'),
+            'tenant_id' => null,
+            'is_platform_admin' => true,
+        ]);
+
+        $this->deleteJson('/api/admin/platform/users/' . $target->uid . '/purge', [
+            'confirmation' => 'wrong@example.test',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.confirmation.0', 'La confirmacion debe coincidir exactamente con el email del usuario');
+
+        $this->assertDatabaseHas('users', ['id' => $target->getKey()]);
+    }
+
+    public function test_superadmin_cannot_lock_or_purge_own_platform_user(): void
+    {
+        $admin = $this->authenticateSuperadmin(['admin.tenants.purge']);
+
+        $this->postJson('/api/admin/platform/users/' . $admin->uid . '/lock')
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.user.0', 'No puedes desactivar tu propio usuario de plataforma');
+
+        $this->deleteJson('/api/admin/platform/users/' . $admin->uid . '/purge', [
+            'confirmation' => $admin->email,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.user.0', 'No puedes eliminar definitivamente tu propio usuario de plataforma');
+
+        $this->assertDatabaseHas('users', ['id' => $admin->getKey()]);
+    }
+
     public function test_plan_delete_deactivates_when_tenants_are_attached(): void
     {
         $this->authenticateSuperadmin(['plans.manage']);

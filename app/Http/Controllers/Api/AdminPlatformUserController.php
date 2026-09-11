@@ -75,4 +75,43 @@ class AdminPlatformUserController extends Controller
             'two_factor_enabled' => false,
         ], 200, '2FA reseteado correctamente');
     }
+
+    public function lock(Request $request, string $uid)
+    {
+        try {
+            return $this->successResponse(
+                $this->service->lock($uid, $request->user()),
+                200,
+                'Usuario de plataforma desactivado'
+            );
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        }
+    }
+
+    public function unlock(string $uid)
+    {
+        try {
+            return $this->successResponse(
+                $this->service->unlock($uid),
+                200,
+                'Usuario de plataforma activado'
+            );
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        }
+    }
+
+    public function purge(Request $request, string $uid)
+    {
+        try {
+            return $this->successResponse(
+                $this->service->purge($uid, $request->user(), $request->all()),
+                200,
+                'Usuario de plataforma eliminado definitivamente'
+            );
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        }
+    }
 }

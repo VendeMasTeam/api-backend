@@ -7950,7 +7950,7 @@ paths:
     put:
       tags: [Admin]
       summary: Actualizar usuario de plataforma
-      description: No existe DELETE para usuarios de plataforma; usar `is_active=false` para desactivar.
+      description: Actualiza datos basicos y roles desde el payload permitido.
       parameters:
         - $ref: '#/components/parameters/UidPath'
       requestBody:
@@ -7962,6 +7962,60 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/GenericSuccess'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/platform/users/{uid}/lock:
+    post:
+      tags: [Admin]
+      summary: Desactivar usuario de plataforma
+      description: Requiere permiso `admin.tenants.purge`. Bloquea el usuario y revoca sus tokens. No permite desactivar el propio usuario ni el ultimo superadmin activo.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '403':
+          description: No autorizado
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/platform/users/{uid}/unlock:
+    post:
+      tags: [Admin]
+      summary: Activar usuario de plataforma
+      description: Requiere permiso `admin.tenants.purge`. Quita bloqueo y reinicia intentos fallidos.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '403':
+          description: No autorizado
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/platform/users/{uid}/purge:
+    delete:
+      tags: [Admin]
+      summary: Eliminar definitivamente usuario de plataforma
+      description: Requiere permiso `admin.tenants.purge`. Borra fisicamente el usuario, tokens, roles/permisos asignados y sesiones de soporte. No permite borrar el propio usuario ni el ultimo superadmin activo.
+      parameters:
+        - $ref: '#/components/parameters/UidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation:
+                  type: string
+                  format: email
+                  example: soporte@vende-mas.com
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '403':
+          description: No autorizado
         '422':
           $ref: '#/components/responses/ValidationError'
   /admin/platform/users/{uid}/2fa/reset:
