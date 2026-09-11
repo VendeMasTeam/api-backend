@@ -80,6 +80,19 @@ class TwoFactorManagementTest extends TestCase
         ]);
     }
 
+    public function test_user_can_start_two_factor_setup_with_full_access_token(): void
+    {
+        $tenant = $this->tenant('Tenant 2FA Setup');
+        $user = $this->tenantUser($tenant, 'setup-own-2fa@example.test');
+
+        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+
+        $this->getJson('/api/2fa/setup')
+            ->assertOk()
+            ->assertJsonPath('data.user.two_factor_enabled', false)
+            ->assertJsonStructure(['data' => ['secret', 'otpauth_url', 'user']]);
+    }
+
     public function test_tenant_admin_can_reset_two_factor_for_user_in_same_tenant(): void
     {
         $tenant = $this->tenant('Tenant 2FA Admin Reset');

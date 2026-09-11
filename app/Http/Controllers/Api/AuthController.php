@@ -236,7 +236,7 @@ class AuthController extends Controller
         $user = $request->user();
         $token = $user->currentAccessToken();
 
-        if (!$token || (!$token->can('*') && !$token->can('2fa:setup'))) {
+        if (!$token || (!$token->can('*') && !$token->can('access:full') && !$token->can('2fa:setup'))) {
             return $this->errorResponse('No autorizado para configurar 2FA', 403, [
                 'two_factor' => ['El token actual no permite configurar 2FA'],
             ]);
@@ -271,7 +271,7 @@ class AuthController extends Controller
         $user = $request->user();
         $token = $user->currentAccessToken();
 
-        if (!$token || (!$token->can('*') && !$token->can('2fa:setup'))) {
+        if (!$token || (!$token->can('*') && !$token->can('access:full') && !$token->can('2fa:setup'))) {
             return $this->errorResponse('No autorizado para confirmar 2FA', 403, [
                 'two_factor' => ['El token actual no permite confirmar 2FA'],
             ]);
