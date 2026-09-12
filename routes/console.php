@@ -13,6 +13,9 @@ use App\Services\TenantDemoDataService;
 use App\Models\Permission;
 use Laravel\Sanctum\Sanctum;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Blueprint;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -228,6 +231,91 @@ Artisan::command('tenants:migrate {--tenant_uid=} {--path=database/migrations/te
 
     return 0;
 })->purpose('Run tenant-scoped migrations inside every tenant schema');
+
+Artisan::command('tenants:migrations:baseline-existing {tenant_uid?} {--all} {--path=database/migrations/tenant} {--through=2026_05_28_000004_create_tenant_procurement_commission_partner_tables}', function () {
+    $tenantUid = $this->argument('tenant_uid');
+    $all = (bool) $this->option('all');
+    $path = (string) $this->option('path');
+    $through = (string) $this->option('through');
+    $schemaService = app(TenantSchemaService::class);
+
+    if (! $tenantUid && ! $all) {
+        $this->error('Envia tenant_uid o usa --all.');
+
+        return 1;
+    }
+
+    if (! is_dir(base_path($path))) {
+        $this->warn('No existe el directorio de migraciones tenant: '.$path);
+
+        return 0;
+    }
+
+    $migrations = collect(glob(base_path($path).'/*.php') ?: [])
+        ->map(fn (string $file) => pathinfo($file, PATHINFO_FILENAME))
+        ->filter(fn (string $migration) => $migration <= $through)
+        ->sort()
+        ->values();
+
+    if ($migrations->isEmpty()) {
+        $this->warn('No hay migraciones para baseline.');
+
+        return 0;
+    }
+
+    $query = Tenant::query()->orderBy('id');
+
+    if ($tenantUid) {
+        $query->where('uid', $tenantUid);
+    }
+
+    $tenants = $query->get();
+
+    if ($tenants->isEmpty()) {
+        $this->warn('No se encontraron tenants para baseline.');
+
+        return 0;
+    }
+
+    foreach ($tenants as $tenant) {
+        $this->info('Baseline tenant '.$tenant->uid.' en schema '.$tenant->schema_name);
+
+        try {
+            $schemaService->createSchema($tenant);
+            $schemaService->setSearchPath($tenant);
+
+            if (! Schema::hasTable('tenant_migrations')) {
+                Schema::create('tenant_migrations', function (Blueprint $table) {
+                    $table->increments('id');
+                    $table->string('migration');
+                    $table->integer('batch');
+                });
+            }
+
+            $existing = collect(DB::table('tenant_migrations')->pluck('migration')->all());
+            $batch = ((int) DB::table('tenant_migrations')->max('batch')) + 1;
+            $inserted = 0;
+
+            foreach ($migrations as $migration) {
+                if ($existing->contains($migration)) {
+                    continue;
+                }
+
+                DB::table('tenant_migrations')->insert([
+                    'migration' => $migration,
+                    'batch' => $batch,
+                ]);
+                $inserted++;
+            }
+
+            $this->line('  migraciones marcadas: '.$inserted);
+        } finally {
+            $schemaService->resetSearchPath();
+        }
+    }
+
+    return 0;
+})->purpose('Mark existing tenant create-table migrations as already applied without deleting data');
 
 Artisan::command('tenants:schemas:copy-data {tenant_uid?} {--all} {--tables=} {--execute} {--truncate}', function () {
     $tenantUid = $this->argument('tenant_uid');
