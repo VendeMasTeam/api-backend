@@ -71,6 +71,7 @@ return new class extends Migration
             $table->string('key');
             $table->string('color', 20);
             $table->string('category')->default('general');
+            $table->json('entity_types')->nullable();
             $table->timestamps();
 
             $table->unique(['tenant_id', 'key']);

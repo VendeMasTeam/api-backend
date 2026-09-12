@@ -32,7 +32,7 @@ class PlatformInitService
         'partners' => ['label' => 'Canales & Partners', 'permissions' => ['partners.read', 'partners.manage', 'partners.opportunities.read', 'partners.opportunities.manage', 'partners.resources.read', 'partners.resources.manage']],
         'intelligence' => ['label' => 'Inteligencia Competitiva', 'permissions' => ['competitive-intelligence.read', 'competitive-intelligence.manage', 'competitive-intelligence.report']],
         'automation' => ['label' => 'Automatizacion', 'permissions' => ['automation.read', 'automation.create', 'automation.update', 'automation.delete', 'segments.read', 'segments.manage']],
-        'settings' => ['label' => 'Configuracion', 'permissions' => ['settings.manage', 'users.manage', 'custom-fields.manage']],
+        'settings' => ['label' => 'Configuracion', 'permissions' => ['settings.manage', 'users.manage', 'custom-fields.manage', 'documents.read', 'documents.manage', 'tags.manage', 'teams.read', 'teams.manage']],
         'tasks' => ['label' => 'Tareas', 'permissions' => ['tasks.read', 'tasks.create', 'tasks.update', 'tasks.delete']],
         'expenses' => ['label' => 'Gastos', 'permissions' => ['expenses.read', 'expenses.manage', 'expenses.report']],
         'purchases' => ['label' => 'Compras', 'permissions' => ['purchases.read', 'purchases.manage']],
@@ -77,6 +77,7 @@ class PlatformInitService
             ['key' => 'custom-fields', 'label' => 'Custom Fields', 'permissions' => ['custom-fields.manage']],
             ['key' => 'localization', 'label' => 'Localizacion', 'permissions' => ['settings.manage']],
             ['key' => 'tags', 'label' => 'Tags', 'permissions' => ['tags.manage']],
+            ['key' => 'document-types', 'label' => 'Tipos de Documento', 'permissions' => ['documents.read', 'documents.manage']],
         ],
         'crm' => [
             ['key' => 'contacts', 'label' => 'Directorio', 'permissions' => ['accounts.read', 'contacts.read', 'crm-entities.read']],

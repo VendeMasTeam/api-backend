@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\InventoryService;
+use App\Support\ApiIndex;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -16,7 +18,21 @@ class InventoryController extends Controller
     public function master(Request $request)
     {
         try {
-            return $this->successResponse($this->inventoryService->master($request->query()));
+            $payload = $this->inventoryService->master($request->query());
+            $meta = null;
+
+            if (($payload['data'] ?? null) instanceof LengthAwarePaginator) {
+                $meta = ApiIndex::meta($payload['data']);
+                $payload['data'] = $payload['data']->items();
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => null,
+                'data' => $payload,
+                'meta' => $meta,
+                'errors' => null,
+            ]);
         } catch (ValidationException $e) {
             return $this->errorResponse('Validation error', 422, $e->errors());
         }

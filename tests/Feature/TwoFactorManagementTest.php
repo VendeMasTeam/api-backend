@@ -29,6 +29,20 @@ class TwoFactorManagementTest extends TestCase
             ->assertJsonStructure(['data' => ['token', 'user']]);
     }
 
+    public function test_legacy_login_alias_matches_api_login(): void
+    {
+        $tenant = $this->tenant('Tenant Legacy Login');
+        $user = $this->tenantUser($tenant, 'legacy-login@example.test');
+
+        $this->postJson('/login', [
+            'email' => $user->email,
+            'password' => 'secret123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.user.email', $user->email)
+            ->assertJsonStructure(['data' => ['token', 'user']]);
+    }
+
     public function test_login_requires_code_when_two_factor_is_enabled(): void
     {
         $tenant = $this->tenant('Tenant 2FA Enabled');

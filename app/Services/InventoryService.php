@@ -11,6 +11,7 @@ use App\Models\Warehouse;
 use App\Support\ApiIndex;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
@@ -314,6 +315,8 @@ class InventoryService
             'is_active' => 'sometimes|boolean',
         ])->validate();
 
+        $this->ensureUniqueWarehouseCode($validated['code']);
+
         return Warehouse::query()->create($validated);
     }
 
@@ -327,9 +330,28 @@ class InventoryService
             'is_active' => 'sometimes|boolean',
         ])->validate();
 
+        if (array_key_exists('code', $validated)) {
+            $this->ensureUniqueWarehouseCode($validated['code'], $warehouse->getKey());
+        }
+
         $warehouse->update($validated);
 
         return $warehouse->fresh();
+    }
+
+    private function ensureUniqueWarehouseCode(string $code, ?int $ignoreId = null): void
+    {
+        $exists = Warehouse::withoutGlobalScopes()
+            ->where('tenant_id', auth()->user()->tenant_id)
+            ->where('code', $code)
+            ->when($ignoreId, fn ($query) => $query->whereKeyNot($ignoreId))
+            ->exists();
+
+        if ($exists) {
+            throw ValidationException::withMessages([
+                'code' => ['Ya existe una bodega con ese codigo'],
+            ]);
+        }
     }
 
     public function deleteWarehouse(string $uid): void
@@ -353,6 +375,9 @@ class InventoryService
             'stock_state' => 'nullable|string|in:normal,low,out',
             'search' => 'nullable|string|max:255',
             'is_active' => 'nullable|string|in:true,false,1,0',
+            'page' => 'sometimes|integer|min:1',
+            'per_page' => 'sometimes|integer|min:1|max:100',
+            'paginate' => 'sometimes',
         ])->validate();
 
         $warehouse = !empty($validated['warehouse_uid'])
@@ -374,6 +399,19 @@ class InventoryService
             ->when(!empty($validated['stock_state']), fn (Collection $collection) => $collection->where('stock_state', $validated['stock_state']))
             ->values();
 
+        $result = $rows;
+        if (ApiIndex::shouldPaginate($filters)) {
+            $page = ApiIndex::page($filters);
+            $perPage = ApiIndex::perPage($filters);
+            $result = new LengthAwarePaginator(
+                $rows->forPage($page, $perPage)->values(),
+                $rows->count(),
+                $perPage,
+                $page,
+                ['pageName' => 'inventory_master_page']
+            );
+        }
+
         return [
             'filters' => [
                 'category_uid' => $validated['category_uid'] ?? null,
@@ -384,7 +422,7 @@ class InventoryService
                     ? filter_var($validated['is_active'], FILTER_VALIDATE_BOOLEAN)
                     : null,
             ],
-            'data' => $rows,
+            'data' => $result,
             'summary' => [
                 'products' => $rows->count(),
                 'active_products' => $rows->where('is_active', true)->count(),

@@ -73,8 +73,8 @@ class InvoiceService
             $query->where(function ($builder) use ($search) {
                 $builder
                     ->whereRaw('LOWER(invoice_number) LIKE ?', [$search])
-                    ->orWhereRaw('LOWER(uid) LIKE ?', [$search])
-                    ->orWhereHas('quotation', fn ($quotationQuery) => $quotationQuery->whereRaw('LOWER(uid) LIKE ?', [$search]));
+                    ->orWhereRaw('LOWER(CAST(uid AS TEXT)) LIKE ?', [$search])
+                    ->orWhereHas('quotation', fn ($quotationQuery) => $quotationQuery->whereRaw('LOWER(CAST(uid AS TEXT)) LIKE ?', [$search]));
             });
         }
 

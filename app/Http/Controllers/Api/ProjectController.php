@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Services\AssignmentService;
 use App\Services\MilestoneService;
 use App\Services\ProjectService;
+use App\Support\ApiIndex;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -20,7 +22,23 @@ class ProjectController extends Controller
 
     public function index(Request $request)
     {
-        return $this->successResponse($this->projectService->getProjects($request->query()));
+        $payload = $this->projectService->getProjects($request->query());
+        $data = $payload['data'];
+        $meta = null;
+
+        if ($data instanceof LengthAwarePaginator) {
+            $meta = ApiIndex::meta($data);
+            $data = $data->items();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => null,
+            'data' => $data,
+            'summary' => $payload['summary'],
+            'meta' => $meta,
+            'errors' => null,
+        ]);
     }
 
     public function show(string $uid)

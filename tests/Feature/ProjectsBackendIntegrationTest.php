@@ -8,6 +8,7 @@ use App\Models\Opportunity;
 use App\Models\OpportunityStage;
 use App\Models\Permission;
 use App\Models\Project;
+use App\Models\ProjectMilestone;
 use App\Models\Quotation;
 use App\Models\Tenant;
 use App\Models\User;
@@ -85,6 +86,54 @@ class ProjectsBackendIntegrationTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.status', 'on_hold');
+    }
+
+    public function test_projects_index_returns_aggregated_summary_with_pagination(): void
+    {
+        $user = $this->authenticateWithPermissions(['projects.read']);
+        $account = Account::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'name' => 'Cliente Proyectos',
+            'document' => 'PROJ-SUM-' . uniqid(),
+        ]);
+
+        $active = Project::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'account_id' => $account->getKey(),
+            'name' => 'Proyecto Activo',
+            'status' => 'active',
+        ]);
+        Project::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'account_id' => $account->getKey(),
+            'name' => 'Proyecto Cerrado',
+            'status' => 'completed',
+        ]);
+        Project::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'account_id' => $account->getKey(),
+            'name' => 'Proyecto Pausado',
+            'status' => 'on_hold',
+        ]);
+        ProjectMilestone::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'project_id' => $active->getKey(),
+            'name' => 'Hito vencido',
+            'due_date' => now()->subDay()->toDateString(),
+            'status' => 'pending',
+            'order' => 1,
+        ]);
+
+        $this->getJson('/api/projects?page=1&per_page=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.pagination.total', 3)
+            ->assertJsonPath('summary.total_projects', 3)
+            ->assertJsonPath('summary.active_projects', 1)
+            ->assertJsonPath('summary.completed_projects', 1)
+            ->assertJsonPath('summary.paused_projects', 1)
+            ->assertJsonPath('summary.overdue_milestones', 1);
     }
 
     public function test_projects_can_be_created_from_invoice_uid_and_keep_traceability(): void

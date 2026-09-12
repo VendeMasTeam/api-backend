@@ -64,7 +64,7 @@ class QuotationService
                     ->whereRaw('LOWER(quote_number) LIKE ?', [$search])
                     ->orWhereRaw('LOWER(title) LIKE ?', [$search])
                     ->orWhereHasMorph('quoteable', [Account::class, Contact::class, CrmEntity::class], function ($entityQuery) use ($search) {
-                        $entityQuery->whereRaw('LOWER(uid) LIKE ?', [$search]);
+                        $entityQuery->whereRaw('LOWER(CAST(uid AS TEXT)) LIKE ?', [$search]);
                     });
             });
         }

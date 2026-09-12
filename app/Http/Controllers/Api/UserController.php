@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\UserService;
+use App\Support\ApiIndex;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -19,7 +21,23 @@ class UserController extends Controller
 
     public function index(Request $request)
     {
-        return $this->successResponse($this->userService->getAll($request->query()));
+        $payload = $this->userService->getAll($request->query());
+        $data = $payload['data'];
+        $meta = null;
+
+        if ($data instanceof LengthAwarePaginator) {
+            $meta = ApiIndex::meta($data);
+            $data = $data->items();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => null,
+            'data' => $data,
+            'summary' => $payload['summary'],
+            'meta' => $meta,
+            'errors' => null,
+        ]);
     }
 
     public function store(Request $request)

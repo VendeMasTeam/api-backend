@@ -68,6 +68,7 @@ class InventoryBackendIntegrationTest extends TestCase
 
         $this->getJson('/api/inventory/master')
             ->assertOk()
+            ->assertJsonPath('meta.pagination.total', 2)
             ->assertJsonPath('data.summary.products', 2)
             ->assertJsonPath('data.summary.active_products', 1)
             ->assertJsonPath('data.summary.out_of_stock_count', 1)
@@ -89,6 +90,14 @@ class InventoryBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.0.summary.total_reserved', 5)
             ->assertJsonPath('data.0.summary.total_available', 45)
             ->assertJsonPath('data.0.summary.total_value', 60000);
+
+        $this->getJson('/api/inventory/master?page=1&per_page=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.data')
+            ->assertJsonPath('meta.pagination.current_page', 1)
+            ->assertJsonPath('meta.pagination.per_page', 1)
+            ->assertJsonPath('meta.pagination.total', 2)
+            ->assertJsonPath('data.summary.products', 2);
     }
 
     public function test_inventory_filters_search_and_active_status_for_frontend(): void
@@ -296,6 +305,26 @@ class InventoryBackendIntegrationTest extends TestCase
             ->assertJsonPath('summary.stock_physical_total', 10)
             ->assertJsonPath('summary.stock_available_total', 8)
             ->assertJsonPath('summary.stock_value_total', 1000);
+    }
+
+    public function test_warehouse_duplicate_code_returns_validation_error(): void
+    {
+        $user = $this->authenticateWithPermissions(['inventory.read', 'inventory.manage']);
+
+        Warehouse::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Bodega Principal',
+            'code' => 'BP-09',
+            'is_active' => true,
+        ]);
+
+        $this->postJson('/api/inventory/warehouses', [
+            'name' => 'Bodega Duplicada',
+            'code' => 'BP-09',
+            'is_active' => true,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.code.0', 'Ya existe una bodega con ese codigo');
     }
 
     public function test_products_are_paginated_by_default_for_inventory_listing(): void

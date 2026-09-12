@@ -11,6 +11,7 @@ use App\Models\ProjectAssignment;
 use App\Models\User;
 use App\Repositories\ProjectRepository;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -51,7 +52,10 @@ class ProjectService
             unset($validated['invoice_uid']);
         }
 
-        return $this->projectRepository->all($validated);
+        return [
+            'data' => $this->projectRepository->all($validated),
+            'summary' => $this->projectRepository->summary($validated),
+        ];
     }
 
     public function showProject(string $uid): Project
@@ -395,34 +399,44 @@ class ProjectService
 
     private function createAccountFromOpportunity(Opportunity $opportunity): Account
     {
+        $payload = [
+            'name' => $opportunity->title ?: 'Lead '.$opportunity->uid,
+            'email' => $opportunity->email,
+            'status' => 'active',
+        ];
+
+        if (Schema::hasColumn('accounts', 'owner_user_id')) {
+            $payload['owner_user_id'] = $opportunity->owner_user_id;
+        }
+
         return Account::query()->firstOrCreate(
             [
                 'tenant_id' => $opportunity->tenant_id,
                 'document' => 'OPP-'.$opportunity->uid,
             ],
-            [
-                'owner_user_id' => $opportunity->owner_user_id,
-                'name' => $opportunity->title ?: 'Lead '.$opportunity->uid,
-                'email' => $opportunity->email,
-                'status' => 'active',
-            ]
+            $payload
         );
     }
 
     private function createAccountFromContact(Contact $contact): Account
     {
+        $payload = [
+            'name' => $contact->display_name ?: 'Contacto '.$contact->uid,
+            'email' => $contact->email,
+            'phone' => $contact->phone,
+            'status' => 'active',
+        ];
+
+        if (Schema::hasColumn('accounts', 'owner_user_id')) {
+            $payload['owner_user_id'] = $contact->owner_user_id;
+        }
+
         $account = Account::query()->firstOrCreate(
             [
                 'tenant_id' => $contact->tenant_id,
                 'document' => 'CONTACT-'.$contact->uid,
             ],
-            [
-                'owner_user_id' => $contact->owner_user_id,
-                'name' => $contact->display_name ?: 'Contacto '.$contact->uid,
-                'email' => $contact->email,
-                'phone' => $contact->phone,
-                'status' => 'active',
-            ]
+            $payload
         );
 
         $contact->forceFill(['account_id' => $account->getKey()])->save();

@@ -10,9 +10,27 @@ class UserRepository
 {
     public function getAll(array $filters = [])
     {
-        $query = User::query()->with(['roles', 'permissions'])->latest();
+        $query = $this->applyFilters(User::query()->with(['roles', 'permissions']), $filters)->latest();
 
-        if (!empty($filters['search'])) {
+        return ApiIndex::paginateOrGet($query, $filters, 'users_page');
+    }
+
+    public function summary(array $filters = []): array
+    {
+        $query = $this->applyFilters(User::query(), $filters);
+
+        return [
+            'total_users' => (clone $query)->count(),
+            'active_users' => (clone $query)
+                ->where(fn ($builder) => $builder->whereNull('locked_until')->orWhere('locked_until', '<=', now()))
+                ->count(),
+            'inactive_users' => (clone $query)->where('locked_until', '>', now())->count(),
+        ];
+    }
+
+    private function applyFilters($query, array $filters)
+    {
+        if (! empty($filters['search'])) {
             $search = $filters['search'];
             $query->where(function ($builder) use ($search) {
                 $builder
@@ -21,11 +39,11 @@ class UserRepository
             });
         }
 
-        if (!empty($filters['role_uid'])) {
+        if (! empty($filters['role_uid'])) {
             $query->whereHas('roles', fn ($roleQuery) => $roleQuery->where('uid', $filters['role_uid']));
         }
 
-        if (!empty($filters['team_uid'])) {
+        if (! empty($filters['team_uid'])) {
             $teamUid = $filters['team_uid'];
             $query->where(function ($builder) use ($teamUid) {
                 $builder
@@ -34,7 +52,7 @@ class UserRepository
             });
         }
 
-        if (!empty($filters['estado'])) {
+        if (! empty($filters['estado'])) {
             if ($filters['estado'] === 'ACTIVO') {
                 $query->where(function ($builder) {
                     $builder->whereNull('locked_until')->orWhere('locked_until', '<=', now());
@@ -46,7 +64,7 @@ class UserRepository
             }
         }
 
-        return ApiIndex::paginateOrGet($query, $filters, 'users_page');
+        return $query;
     }
 
     public function findByUid(string $uid)

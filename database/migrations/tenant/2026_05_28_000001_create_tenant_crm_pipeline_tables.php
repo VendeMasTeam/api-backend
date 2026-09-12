@@ -13,6 +13,7 @@ return new class extends Migration
             $table->id();
             $table->uuid('uid')->nullable()->unique('accounts_uid_unique');
             $table->unsignedBigInteger('tenant_id');
+            $table->foreignId('owner_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('name');
             $table->string('document');
             $table->string('email')->nullable();
@@ -31,6 +32,7 @@ return new class extends Migration
             $table->id();
             $table->uuid('uid')->nullable()->unique('contacts_uid_unique');
             $table->unsignedBigInteger('tenant_id');
+            $table->foreignId('owner_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('account_id')->nullable()->constrained('accounts')->nullOnDelete();
             $table->string('first_name');
             $table->string('last_name')->nullable();

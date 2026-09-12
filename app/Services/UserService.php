@@ -17,7 +17,10 @@ class UserService
 
     public function getAll(array $filters = [])
     {
-        return $this->repo->getAll($filters);
+        return [
+            'data' => $this->repo->getAll($filters),
+            'summary' => $this->repo->summary($filters),
+        ];
     }
 
     public function findByUid(string $uid)

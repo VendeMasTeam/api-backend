@@ -14,30 +14,52 @@ class ProjectRepository
 
     public function all(array $filters = [])
     {
-        $query = $this->query()->orderByDesc('created_at');
+        $query = $this->applyFilters($this->query(), $filters)->orderByDesc('created_at');
 
-        if (!empty($filters['search'])) {
+        return ApiIndex::paginateOrGet($query, $filters, 'projects_page');
+    }
+
+    public function summary(array $filters = []): array
+    {
+        $query = $this->applyFilters(Project::query(), $filters);
+
+        return [
+            'total_projects' => (clone $query)->count(),
+            'active_projects' => (clone $query)->whereIn('status', ['active', 'in_progress'])->count(),
+            'completed_projects' => (clone $query)->where('status', 'completed')->count(),
+            'paused_projects' => (clone $query)->whereIn('status', ['on_hold', 'paused'])->count(),
+            'overdue_milestones' => (clone $query)
+                ->whereHas('milestones', fn ($milestoneQuery) => $milestoneQuery
+                    ->whereDate('due_date', '<', now()->toDateString())
+                    ->where('status', '!=', 'completed'))
+                ->count(),
+        ];
+    }
+
+    private function applyFilters($query, array $filters)
+    {
+        if (! empty($filters['search'])) {
             $search = '%' . mb_strtolower($filters['search']) . '%';
             $query->whereRaw('LOWER(name) LIKE ?', [$search]);
         }
 
-        if (!empty($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
 
-        if (!empty($filters['account_id'])) {
+        if (! empty($filters['account_id'])) {
             $query->where('account_id', $filters['account_id']);
         }
 
-        if (!empty($filters['opportunity_id'])) {
+        if (! empty($filters['opportunity_id'])) {
             $query->where('opportunity_id', $filters['opportunity_id']);
         }
 
-        if (!empty($filters['invoice_id'])) {
+        if (! empty($filters['invoice_id'])) {
             $query->where('invoice_id', $filters['invoice_id']);
         }
 
-        return ApiIndex::paginateOrGet($query, $filters, 'projects_page');
+        return $query;
     }
 
     public function findByUid(string $uid): Project

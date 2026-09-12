@@ -155,6 +155,33 @@ class SettingsBackendIntegrationTest extends TestCase
             ->assertJsonPath('meta.pagination.total', 2);
     }
 
+    public function test_users_index_returns_aggregated_summary_with_pagination(): void
+    {
+        $user = $this->authenticateWithPermissions(['users.manage']);
+
+        User::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Activo Operativo',
+            'email' => 'activo+' . uniqid() . '@example.test',
+            'password' => bcrypt('secret123'),
+        ]);
+        User::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Bloqueado Operativo',
+            'email' => 'bloqueado+' . uniqid() . '@example.test',
+            'password' => bcrypt('secret123'),
+            'locked_until' => now()->addYear(),
+        ]);
+
+        $this->getJson('/api/users?page=1&per_page=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.pagination.total', 3)
+            ->assertJsonPath('summary.total_users', 3)
+            ->assertJsonPath('summary.active_users', 2)
+            ->assertJsonPath('summary.inactive_users', 1);
+    }
+
     public function test_roles_generate_key_from_name_when_missing(): void
     {
         $this->authenticateWithPermissions(['users.manage']);
