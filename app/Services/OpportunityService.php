@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Support\ApiIndex;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use ZipArchive;
@@ -218,7 +219,7 @@ class OpportunityService
             $stage = $this->resolveStage($validated['stage_uid']);
             $entity = $this->resolveEntity($validated['entity_type'] ?? null, $validated['entity_uid'] ?? null);
 
-            $opportunity = Opportunity::query()->create([
+            $payload = [
                 'owner_user_id' => $this->resolveOwnerUserId($validated['owner_user_uid'] ?? null, $entity?->owner_user_id),
                 'stage_id' => $stage->getKey(),
                 'opportunityable_type' => $entity ? get_class($entity) : null,
@@ -232,8 +233,13 @@ class OpportunityService
                 'description' => $validated['description'] ?? null,
                 'won_at' => $this->isWonClosingStage($stage) ? now() : null,
                 'lost_at' => $stage->is_lost ? now() : null,
-                'kanban_position' => $this->nextKanbanPosition($stage->getKey()),
-            ]);
+            ];
+
+            if ($this->supportsKanbanPosition()) {
+                $payload['kanban_position'] = $this->nextKanbanPosition($stage->getKey());
+            }
+
+            $opportunity = Opportunity::query()->create($payload);
 
             $this->assignCustomFieldValues($opportunity, $validated['custom_fields'] ?? []);
 
@@ -264,7 +270,10 @@ class OpportunityService
                 $payload['stage_id'] = $stage->getKey();
                 $payload['won_at'] = $this->isWonClosingStage($stage) ? now() : null;
                 $payload['lost_at'] = $stage->is_lost ? now() : null;
-                $payload['kanban_position'] = $this->nextKanbanPosition($stage->getKey());
+
+                if ($this->supportsKanbanPosition()) {
+                    $payload['kanban_position'] = $this->nextKanbanPosition($stage->getKey());
+                }
             }
 
             if (array_key_exists('owner_user_uid', $validated)) {
@@ -301,12 +310,17 @@ class OpportunityService
         return DB::transaction(function () use ($uid, $validated) {
             $opportunity = Opportunity::query()->where('uid', $uid)->firstOrFail();
             $stage = $this->resolveOutcomeStage($opportunity, 'won');
-            $opportunity->update([
+            $payload = [
                 'stage_id' => $stage?->getKey() ?? $opportunity->stage_id,
                 'won_at' => now(),
                 'lost_at' => null,
-                'kanban_position' => $this->nextKanbanPosition($stage?->getKey() ?? $opportunity->stage_id),
-            ]);
+            ];
+
+            if ($this->supportsKanbanPosition()) {
+                $payload['kanban_position'] = $this->nextKanbanPosition($stage?->getKey() ?? $opportunity->stage_id);
+            }
+
+            $opportunity->update($payload);
 
             $project = $this->projectService->createFromOpportunityModel($opportunity->fresh(['opportunityable']), quietIfNoAccount: true);
             $note = $validated['notes'] ?? $validated['comment'] ?? null;
@@ -371,12 +385,17 @@ class OpportunityService
             }
 
             $stage = $this->resolveOutcomeStage($opportunity, 'lost');
-            $opportunity->update([
+            $payload = [
                 'stage_id' => $stage?->getKey() ?? $opportunity->stage_id,
                 'won_at' => null,
                 'lost_at' => now(),
-                'kanban_position' => $this->nextKanbanPosition($stage?->getKey() ?? $opportunity->stage_id),
-            ]);
+            ];
+
+            if ($this->supportsKanbanPosition()) {
+                $payload['kanban_position'] = $this->nextKanbanPosition($stage?->getKey() ?? $opportunity->stage_id);
+            }
+
+            $opportunity->update($payload);
 
             $reasons = $validated['lost_reasons'] ?? $validated['reasons'] ?? [];
             $createdReasons = collect($reasons)
@@ -554,11 +573,14 @@ class OpportunityService
             $this->applyOpportunityProductFilter($opportunityQuery, $validated['product']);
         }
 
+        $opportunityQuery->orderBy('stage_id');
+
+        if ($this->supportsKanbanPosition()) {
+            $opportunityQuery->orderBy('kanban_position');
+        }
+
         $result = ApiIndex::paginateOrGet(
-            $opportunityQuery
-                ->orderBy('stage_id')
-                ->orderBy('kanban_position')
-                ->orderByDesc('created_at'),
+            $opportunityQuery->orderByDesc('created_at'),
             $filters,
             'opportunities_board_page'
         );
@@ -609,6 +631,12 @@ class OpportunityService
 
     public function reorderBoard(array $data): array
     {
+        if (! $this->supportsKanbanPosition()) {
+            throw ValidationException::withMessages([
+                'kanban_position' => ['La base de datos tenant aun no tiene habilitado el orden del kanban. Ejecuta tenants:migrate.'],
+            ]);
+        }
+
         $validated = Validator::make($data, [
             'stage_uid' => 'required|uuid',
             'ordered_opportunity_uids' => 'required_without:opportunity_uids|array|min:1',
@@ -699,7 +727,7 @@ class OpportunityService
             'opportunityable_type' => $opportunity->opportunityable_type,
             'opportunityable_uid' => $this->resolveMorphUid($opportunity->opportunityable_type, $opportunity->opportunityable_id),
             'custom_fields' => $opportunity->custom_fields,
-            'kanban_position' => (int) $opportunity->kanban_position,
+            'kanban_position' => (int) ($opportunity->kanban_position ?? 0),
             'is_closed' => (bool) ($opportunity->won_at || $opportunity->lost_at),
             'closed_status' => $opportunity->lost_at ? 'lost' : ($opportunity->won_at ? 'won' : null),
             'closed_at' => $opportunity->lost_at ?? $opportunity->won_at,
@@ -1012,6 +1040,11 @@ class OpportunityService
         return ((int) Opportunity::query()
             ->where('stage_id', $stageId)
             ->max('kanban_position')) + 1;
+    }
+
+    private function supportsKanbanPosition(): bool
+    {
+        return Schema::hasColumn('opportunities', 'kanban_position');
     }
 
     public function summary(): array
