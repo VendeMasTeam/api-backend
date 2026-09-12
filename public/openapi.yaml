@@ -3397,9 +3397,55 @@ paths:
   /finance/invoices:
     get:
       description: >-
-        Requiere permiso finance.read.
+        Requiere permiso finance.read. Para el tab de facturas de una oportunidad usa opportunity_uid; devuelve todas las facturas de todas las cotizaciones de esa oportunidad.
       tags: [Finance]
       summary: 'Consultar - finance/invoices'
+      parameters:
+        - in: query
+          name: entity_type
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: entity_uid
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: quotation_uid
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: opportunity_uid
+          required: false
+          description: Filtra facturas por oportunidad/lead, incluyendo todas sus cotizaciones.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [draft, issued, partial, paid, overdue]
+        - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: per_page
+          required: false
+          schema:
+            type: integer
       responses:
         '200':
           description: Operacion exitosa
@@ -3414,12 +3460,34 @@ paths:
     post:
       tags: [Finance]
       summary: 'Crear factura - finance/invoices'
+      description: >-
+        Requiere permiso finance.manage. Convierte una cotizacion a factura. Si hay productos fisicos con stock disponible pendiente de reservar, el backend intenta reservarlos automaticamente antes de facturar. Los servicios no requieren stock.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GenericRequest'
+              type: object
+              required: [quotation_uid, currency]
+              properties:
+                quotation_uid:
+                  type: string
+                  format: uuid
+                currency:
+                  type: string
+                  example: COP
+                exchange_rate:
+                  type: number
+                  format: float
+                due_date:
+                  type: string
+                  format: date
+                status:
+                  type: string
+                  enum: [draft, issued]
+              example:
+                quotation_uid: "26a1c3fd-8381-4a41-86bc-c3c2246f8d78"
+                currency: COP
       responses:
         '201':
           description: Operacion exitosa

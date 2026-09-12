@@ -158,6 +158,44 @@ class ProjectsBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.0.uid', $projectUid);
     }
 
+    public function test_project_can_be_created_from_loose_lead_opportunity(): void
+    {
+        $user = $this->authenticateWithPermissions(['projects.read', 'projects.manage']);
+        $stage = OpportunityStage::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Ganada',
+            'key' => 'won-loose-' . uniqid(),
+            'position' => 1,
+            'is_won' => true,
+        ]);
+        $opportunity = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $stage->getKey(),
+            'title' => 'Lead sin empresa',
+            'email' => 'lead-loose@example.test',
+            'amount' => 5000,
+            'currency' => 'COP',
+        ]);
+
+        $created = $this->postJson('/api/projects', [
+            'opportunity_uid' => $opportunity->uid,
+            'name' => 'Proyecto desde lead suelto',
+            'status' => 'planning',
+        ]);
+
+        $created->assertCreated()
+            ->assertJsonPath('data.opportunity_uid', $opportunity->uid)
+            ->assertJsonPath('data.client_name', 'Lead sin empresa');
+
+        $this->assertDatabaseHas('accounts', [
+            'tenant_id' => $user->tenant_id,
+            'document' => 'OPP-' . $opportunity->uid,
+            'name' => 'Lead sin empresa',
+            'email' => 'lead-loose@example.test',
+        ]);
+    }
+
     public function test_milestones_assignments_team_and_progress_match_frontend_contract(): void
     {
         $user = $this->authenticateWithPermissions(['projects.read', 'projects.manage']);

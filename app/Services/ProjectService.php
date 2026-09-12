@@ -387,9 +387,46 @@ class ProjectService
         }
 
         if ($entity instanceof Contact) {
-            return $entity->account_id;
+            return $entity->account_id ?: $this->createAccountFromContact($entity)->getKey();
         }
 
-        return null;
+        return $this->createAccountFromOpportunity($opportunity)->getKey();
+    }
+
+    private function createAccountFromOpportunity(Opportunity $opportunity): Account
+    {
+        return Account::query()->firstOrCreate(
+            [
+                'tenant_id' => $opportunity->tenant_id,
+                'document' => 'OPP-'.$opportunity->uid,
+            ],
+            [
+                'owner_user_id' => $opportunity->owner_user_id,
+                'name' => $opportunity->title ?: 'Lead '.$opportunity->uid,
+                'email' => $opportunity->email,
+                'status' => 'active',
+            ]
+        );
+    }
+
+    private function createAccountFromContact(Contact $contact): Account
+    {
+        $account = Account::query()->firstOrCreate(
+            [
+                'tenant_id' => $contact->tenant_id,
+                'document' => 'CONTACT-'.$contact->uid,
+            ],
+            [
+                'owner_user_id' => $contact->owner_user_id,
+                'name' => $contact->display_name ?: 'Contacto '.$contact->uid,
+                'email' => $contact->email,
+                'phone' => $contact->phone,
+                'status' => 'active',
+            ]
+        );
+
+        $contact->forceFill(['account_id' => $account->getKey()])->save();
+
+        return $account;
     }
 }

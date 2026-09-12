@@ -3,8 +3,12 @@
 namespace App\Services;
 
 use App\Models\Account;
+use App\Models\InventoryProduct;
 use App\Models\InventoryReservation;
+use App\Models\InventoryStock;
 use App\Models\Invoice;
+use App\Models\Opportunity;
+use App\Models\Product;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Support\ApiIndex;
@@ -28,6 +32,7 @@ class InvoiceService
             'entity_type' => 'nullable|string',
             'entity_uid' => 'nullable|uuid',
             'quotation_uid' => 'nullable|uuid',
+            'opportunity_uid' => 'nullable|uuid',
             'status' => 'nullable|string|in:draft,issued,partial,paid,overdue',
             'search' => 'nullable|string|max:255',
             'page' => 'sometimes|integer|min:1',
@@ -47,6 +52,16 @@ class InvoiceService
 
         if (! empty($validated['quotation_uid'])) {
             $query->where('quotation_id', $this->resolveQuotation($validated['quotation_uid'])->getKey());
+        }
+
+        if (! empty($validated['opportunity_uid'])) {
+            $opportunity = Opportunity::query()->where('uid', $validated['opportunity_uid'])->first();
+
+            $query->whereHas('quotation', function ($quotationQuery) use ($opportunity) {
+                $quotationQuery
+                    ->where('quoteable_type', Opportunity::class)
+                    ->where('quoteable_id', $opportunity?->getKey() ?: 0);
+            });
         }
 
         if (! empty($validated['status'])) {
@@ -111,7 +126,10 @@ class InvoiceService
         ])->validate();
 
         return DB::transaction(function () use ($validated) {
-            $quotation = Quotation::query()->with(['items.product', 'items.catalogProduct', 'items.warehouse', 'quoteable'])->where('uid', $validated['quotation_uid'])->firstOrFail();
+            $quotation = Quotation::query()
+                ->with(['items.product', 'items.catalogProduct.inventoryProduct', 'items.warehouse', 'quoteable'])
+                ->where('uid', $validated['quotation_uid'])
+                ->firstOrFail();
             $entity = $quotation->quoteable;
 
             if (! $entity) {
@@ -125,6 +143,8 @@ class InvoiceService
                 $this->documentValidationService->ensureReadyForAccount($entity);
             }
 
+            $this->reservePendingQuotationStock($quotation);
+            $quotation->load(['items.product', 'items.catalogProduct.inventoryProduct', 'items.warehouse']);
             $this->ensureQuotationItemsAreReadyToInvoice($quotation);
 
             $invoiceNumber = $this->generateInvoiceNumber($quotation->tenant_id);
@@ -398,6 +418,155 @@ class InvoiceService
         }
 
         return true;
+    }
+
+    private function reservePendingQuotationStock(Quotation $quotation): void
+    {
+        foreach ($quotation->items as $item) {
+            $this->hydrateItemProductLinks($item);
+
+            if ($item->quantity <= 0 || ! $this->itemRequiresStockReservation($item)) {
+                continue;
+            }
+
+            $product = $this->resolveInventoryProductForReservation($item);
+
+            if (! $product) {
+                continue;
+            }
+
+            $pendingQuantity = max(0, (int) $item->quantity - (int) $item->reserved_quantity);
+
+            if ($pendingQuantity === 0) {
+                continue;
+            }
+
+            $this->reserveItemAcrossWarehouses($item, $product, $pendingQuantity);
+        }
+    }
+
+    private function hydrateItemProductLinks(QuotationItem $item): void
+    {
+        $catalogProduct = $item->catalogProduct;
+        $product = $item->product;
+
+        if (! $catalogProduct && $item->sku) {
+            $catalogProduct = Product::query()
+                ->with('inventoryProduct')
+                ->where('sku', $item->sku)
+                ->first();
+
+            if ($catalogProduct) {
+                $item->setRelation('catalogProduct', $catalogProduct);
+            }
+        }
+
+        if (! $product && $catalogProduct?->inventoryProduct) {
+            $product = $catalogProduct->inventoryProduct;
+            $item->setRelation('product', $product);
+        }
+
+        if (! $product && $item->sku) {
+            $product = InventoryProduct::query()
+                ->where('sku', $item->sku)
+                ->first();
+
+            if ($product) {
+                $item->setRelation('product', $product);
+            }
+        }
+
+        $payload = [];
+
+        if (! $item->catalog_product_id && $catalogProduct) {
+            $payload['catalog_product_id'] = $catalogProduct->getKey();
+        }
+
+        if (! $item->product_id && $product) {
+            $payload['product_id'] = $product->getKey();
+        }
+
+        if ($payload !== []) {
+            $item->forceFill($payload)->save();
+        }
+    }
+
+    private function resolveInventoryProductForReservation(QuotationItem $item): ?InventoryProduct
+    {
+        $product = $item->product ?? $item->catalogProduct?->inventoryProduct;
+
+        if (! $product) {
+            return null;
+        }
+
+        if (! $item->product_id) {
+            $item->forceFill(['product_id' => $product->getKey()])->save();
+            $item->setRelation('product', $product);
+        }
+
+        return $product;
+    }
+
+    private function reserveItemAcrossWarehouses(QuotationItem $item, InventoryProduct $product, int $quantity): void
+    {
+        $stocks = InventoryStock::query()
+            ->with('warehouse')
+            ->where('product_id', $product->getKey())
+            ->get()
+            ->map(fn (InventoryStock $stock) => [
+                'stock' => $stock,
+                'available' => max(0, (int) $stock->physical_stock - (int) $stock->reserved_stock),
+                'preferred' => $item->warehouse_id && $stock->warehouse_id === $item->warehouse_id,
+            ])
+            ->filter(fn (array $row) => $row['available'] > 0)
+            ->sortBy([
+                ['preferred', 'desc'],
+                ['available', 'desc'],
+            ])
+            ->values();
+
+        $available = (int) $stocks->sum('available');
+
+        if ($available < $quantity) {
+            throw ValidationException::withMessages([
+                'quotation_uid' => ['No puedes facturar sin stock reservado suficiente para los productos fisicos'],
+                'items' => [
+                    $this->stockValidationMessage(
+                        $item,
+                        sprintf('requiere %s unidades, disponible %s y faltan %s', $quantity, $available, max(0, $quantity - $available))
+                    ),
+                ],
+            ]);
+        }
+
+        $remaining = $quantity;
+        $firstWarehouseId = null;
+
+        foreach ($stocks as $row) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            /** @var InventoryStock $stock */
+            $stock = $row['stock'];
+            $reservedQuantity = min($remaining, $row['available']);
+
+            $this->inventoryService->reserveStock([
+                'product_uid' => $product->uid,
+                'warehouse_uid' => $stock->warehouse?->uid,
+                'quantity' => $reservedQuantity,
+                'source_type' => 'quotation_item',
+                'source_uid' => $item->uid,
+                'comment' => 'Reserva automatica por facturacion',
+            ]);
+
+            $firstWarehouseId ??= $stock->warehouse_id;
+            $remaining -= $reservedQuantity;
+        }
+
+        if (! $item->warehouse_id && $firstWarehouseId) {
+            $item->forceFill(['warehouse_id' => $firstWarehouseId])->save();
+        }
     }
 
     private function ensureQuotationItemsAreReadyToInvoice(Quotation $quotation): void

@@ -237,6 +237,101 @@ class SalesBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.0.invoice_number', 'INV-ENTERPRISE-001');
     }
 
+    public function test_invoices_can_be_filtered_by_opportunity_uid(): void
+    {
+        $user = $this->authenticateWithPermissions(['finance.read']);
+        $stage = OpportunityStage::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Leads',
+            'key' => 'leads-invoices',
+            'position' => 1,
+            'is_active' => true,
+        ]);
+        $opportunity = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $stage->getKey(),
+            'title' => 'Lead con varias facturas',
+            'amount' => 1000,
+        ]);
+        $otherOpportunity = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $stage->getKey(),
+            'title' => 'Otro lead',
+            'amount' => 1000,
+        ]);
+
+        $firstQuote = Quotation::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'quoteable_type' => Opportunity::class,
+            'quoteable_id' => $opportunity->getKey(),
+            'quote_number' => 'Q-OPP-INV-1',
+            'title' => 'Cotizacion 1',
+            'status' => 'invoiced',
+        ]);
+        $secondQuote = Quotation::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'quoteable_type' => Opportunity::class,
+            'quoteable_id' => $opportunity->getKey(),
+            'quote_number' => 'Q-OPP-INV-2',
+            'title' => 'Cotizacion 2',
+            'status' => 'invoiced',
+        ]);
+        $otherQuote = Quotation::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'quoteable_type' => Opportunity::class,
+            'quoteable_id' => $otherOpportunity->getKey(),
+            'quote_number' => 'Q-OPP-INV-3',
+            'title' => 'Cotizacion otra',
+            'status' => 'invoiced',
+        ]);
+
+        Invoice::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'quotation_id' => $firstQuote->getKey(),
+            'invoiceable_type' => Opportunity::class,
+            'invoiceable_id' => $opportunity->getKey(),
+            'invoice_number' => 'INV-OPP-001',
+            'status' => 'issued',
+            'currency' => 'COP',
+            'total' => 100,
+            'outstanding_total' => 100,
+        ]);
+        Invoice::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'quotation_id' => $secondQuote->getKey(),
+            'invoiceable_type' => Opportunity::class,
+            'invoiceable_id' => $opportunity->getKey(),
+            'invoice_number' => 'INV-OPP-002',
+            'status' => 'issued',
+            'currency' => 'COP',
+            'total' => 200,
+            'outstanding_total' => 200,
+        ]);
+        Invoice::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'quotation_id' => $otherQuote->getKey(),
+            'invoiceable_type' => Opportunity::class,
+            'invoiceable_id' => $otherOpportunity->getKey(),
+            'invoice_number' => 'INV-OPP-003',
+            'status' => 'issued',
+            'currency' => 'COP',
+            'total' => 300,
+            'outstanding_total' => 300,
+        ]);
+
+        $this->getJson('/api/finance/invoices?opportunity_uid='.$opportunity->uid)
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonFragment(['invoice_number' => 'INV-OPP-001'])
+            ->assertJsonFragment(['invoice_number' => 'INV-OPP-002'])
+            ->assertJsonMissing(['invoice_number' => 'INV-OPP-003']);
+    }
+
     public function test_invoice_number_is_generated_by_backend_when_converting_quotation(): void
     {
         $user = $this->authenticateWithPermissions(['finance.read', 'finance.manage']);
@@ -742,7 +837,7 @@ class SalesBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.total', '900.00');
     }
 
-    public function test_invoice_stock_validation_reports_only_physical_products_without_reserved_stock(): void
+    public function test_invoice_creation_auto_reserves_physical_products_and_ignores_services(): void
     {
         $user = $this->authenticateWithPermissions(['finance.manage']);
         $account = $this->account($user);
@@ -827,15 +922,93 @@ class SalesBackendIntegrationTest extends TestCase
         ]);
 
         $response
+            ->assertCreated()
+            ->assertJsonPath('data.quotation_uid', $quotation->uid);
+
+        $this->assertSame(0, (int) InventoryReservation::query()
+            ->where('source_uid', $quotation->items()->where('sku', 'CAM-26-001')->value('uid'))
+            ->where('status', 'active')
+            ->sum('quantity'));
+        $this->assertSame(2, (int) InventoryReservation::query()
+            ->where('source_uid', $quotation->items()->where('sku', 'CAM-26-001')->value('uid'))
+            ->where('status', 'consumed')
+            ->sum('quantity'));
+        $this->assertSame(0, InventoryReservation::query()
+            ->where('source_uid', $quotation->items()->where('sku', 'SERV-CONSULT')->value('uid'))
+            ->count());
+    }
+
+    public function test_invoice_stock_validation_reports_physical_products_when_stock_is_insufficient(): void
+    {
+        $user = $this->authenticateWithPermissions(['finance.manage']);
+        $account = $this->account($user);
+        $inventoryProduct = InventoryProduct::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'sku' => 'INV-LOW-001',
+            'name' => 'Producto bajo',
+            'cost_price' => 5000,
+            'sale_price' => 20000,
+            'is_active' => true,
+        ]);
+        $catalogProduct = Product::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'inventory_product_id' => $inventoryProduct->getKey(),
+            'name' => 'Producto bajo catalogo',
+            'type' => 'product',
+            'sku' => 'LOW-001',
+            'status' => 'active',
+        ]);
+        $warehouse = Warehouse::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Bodega Baja',
+            'code' => 'LOW',
+        ]);
+        InventoryStock::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'product_id' => $inventoryProduct->getKey(),
+            'warehouse_id' => $warehouse->getKey(),
+            'physical_stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $quotation = Quotation::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'quoteable_type' => Account::class,
+            'quoteable_id' => $account->getKey(),
+            'quote_number' => 'Q-STOCK-LOW-'.uniqid(),
+            'title' => 'Cotizacion sin stock suficiente',
+            'status' => 'approved',
+            'currency' => 'COP',
+        ]);
+
+        QuotationItem::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'quotation_id' => $quotation->getKey(),
+            'catalog_product_id' => $catalogProduct->getKey(),
+            'sku' => 'LOW-001',
+            'description' => 'Producto bajo catalogo',
+            'quantity' => 3,
+            'list_unit_price' => 20000,
+            'discount_percent' => 0,
+            'discount_amount' => 0,
+            'net_unit_price' => 20000,
+            'unit_price' => 20000,
+        ]);
+
+        $response = $this->postJson('/api/finance/invoices', [
+            'quotation_uid' => $quotation->uid,
+            'currency' => 'COP',
+        ]);
+
+        $response
             ->assertUnprocessable()
             ->assertJsonPath('errors.quotation_uid.0', 'No puedes facturar sin stock reservado suficiente para los productos fisicos');
 
         $messages = $response->json('errors.items');
 
         $this->assertCount(1, $messages);
-        $this->assertStringContainsString('Camisa', $messages[0]);
+        $this->assertStringContainsString('Producto bajo catalogo', $messages[0]);
         $this->assertStringContainsString('faltan 2', $messages[0]);
-        $this->assertStringNotContainsString('Consultoria', implode(' ', $messages));
     }
 
     public function test_approving_quotation_resolves_catalog_product_and_allocates_stock(): void
