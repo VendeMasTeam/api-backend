@@ -19,11 +19,18 @@ services:
       - traefik-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`vende-mas.com.co`) && (PathPrefix(`/api`) || Path(`/login`) || Path(`/forgot-password`) || Path(`/reset-password`) || Path(`/logout`) || Path(`/me`) || PathPrefix(`/me/`) || PathPrefix(`/auth`) || PathPrefix(`/2fa`))"
+      - "traefik.http.routers.api.rule=Host(`vende-mas.com.co`) && PathPrefix(`/api`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.api.priority=100"
+      - "traefik.http.routers.api.priority=110"
       - "traefik.http.services.api.loadbalancer.server.port=8080"
+      - "traefik.http.routers.api-legacy.rule=Host(`vende-mas.com.co`) && HeadersRegexp(`Accept`, `.*application/json.*`) && (Path(`/login`) || Path(`/forgot-password`) || Path(`/reset-password`) || Path(`/logout`) || Path(`/me`) || PathPrefix(`/me/`) || PathPrefix(`/auth`) || PathPrefix(`/2fa`) || PathPrefix(`/admin`) || PathPrefix(`/plans`) || PathPrefix(`/accounts`) || PathPrefix(`/contacts`) || PathPrefix(`/relations`) || PathPrefix(`/crm-entities`) || PathPrefix(`/tags`) || PathPrefix(`/tasks`) || PathPrefix(`/interactions`) || PathPrefix(`/activities`) || PathPrefix(`/segments`) || PathPrefix(`/teams`) || PathPrefix(`/automation`) || PathPrefix(`/documents`) || PathPrefix(`/document-types`) || PathPrefix(`/document-alerts`) || PathPrefix(`/inventory`) || PathPrefix(`/quotations`) || PathPrefix(`/quotes`) || PathPrefix(`/products`) || PathPrefix(`/price-books`) || PathPrefix(`/commissions`) || PathPrefix(`/partners`) || PathPrefix(`/competitive-intelligence`) || PathPrefix(`/opportunities`) || PathPrefix(`/projects`) || PathPrefix(`/milestones`) || PathPrefix(`/finance`) || PathPrefix(`/invoices`) || PathPrefix(`/currency`) || PathPrefix(`/payments`) || PathPrefix(`/search`) || PathPrefix(`/dashboard`) || PathPrefix(`/schedule`) || PathPrefix(`/settings`) || PathPrefix(`/reports`) || PathPrefix(`/metrics`) || PathPrefix(`/logs`) || PathPrefix(`/rbac`) || PathPrefix(`/support`))"
+      - "traefik.http.routers.api-legacy.entrypoints=websecure"
+      - "traefik.http.routers.api-legacy.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api-legacy.priority=100"
+      - "traefik.http.routers.api-legacy.middlewares=api-legacy-add-prefix"
+      - "traefik.http.routers.api-legacy.service=api"
+      - "traefik.http.middlewares.api-legacy-add-prefix.addprefix.prefix=/api"
 
   queue:
     image: vende-mas-api:latest
