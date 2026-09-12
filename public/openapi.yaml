@@ -3754,6 +3754,45 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /inventory/stock/entry-options:
+    get:
+      description: >-
+        Requiere permiso inventory.read. Devuelve productos activos y bodegas activas para el drawer de registrar entrada de mercancia en una sola llamada.
+      tags: [Inventory]
+      summary: Opciones para registrar entrada de mercancia
+      parameters:
+        - in: query
+          name: warehouse_uid
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 255
+        - in: query
+          name: is_active
+          schema:
+            type: string
+            enum: ['true', 'false', '1', '0']
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        '200':
+          description: Operacion exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /inventory/movements:
     get:
       description: >-
@@ -4379,6 +4418,137 @@ paths:
           required: false
           schema:
             type: string
+        - in: query
+          name: closed_days
+          required: false
+          description: Dias hacia atras para mostrar oportunidades ganadas/perdidas en el board. Por defecto 7.
+          schema:
+            type: integer
+            default: 7
+        - in: query
+          name: include_closed
+          required: false
+          description: Si es false, el board solo devuelve oportunidades activas.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Operacion exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /opportunities/board/reorder:
+    post:
+      description: >-
+        Requiere permiso opportunities.manage. Reordena oportunidades dentro de una misma columna/etapa del kanban.
+      tags: [Opportunities]
+      summary: 'Reordenar tablero - opportunities/board/reorder'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stage_uid, ordered_opportunity_uids]
+              properties:
+                stage_uid:
+                  type: string
+                  format: uuid
+                ordered_opportunity_uids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+              example:
+                stage_uid: "11111111-1111-4111-8111-111111111111"
+                ordered_opportunity_uids:
+                  - "22222222-2222-4222-8222-222222222222"
+                  - "33333333-3333-4333-8333-333333333333"
+      responses:
+        '200':
+          description: Operacion exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /opportunities/history:
+    get:
+      description: >-
+        Requiere permiso opportunities.read. Tabla historica paginada de oportunidades activas y cerradas.
+      tags: [Opportunities]
+      summary: 'Historial de oportunidades - opportunities/history'
+      parameters:
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: per_page
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: stage_uid
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: owner_user_uid
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: origin
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [active, open, closed, won, lost]
+        - in: query
+          name: created_from
+          required: false
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: created_to
+          required: false
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: closed_from
+          required: false
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: closed_to
+          required: false
+          schema:
+            type: string
+            format: date
       responses:
         '200':
           description: Operacion exitosa
@@ -10698,8 +10868,10 @@ components:
                   type: object
                 permissions:
                   type: object
+                  description: Permisos efectivos del tenant. En sesiones de plataforma viene vacio.
                 admin_permissions:
                   type: array
+                  description: Fuente de verdad para permisos de plataforma/superadmin/soporte. En usuarios de tenant viene vacio.
                   items:
                     type: string
                 support_mode:

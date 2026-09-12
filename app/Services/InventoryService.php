@@ -85,7 +85,7 @@ class InventoryService
                 ->when(!empty($validated['search']), fn ($query) => $this->applyProductSearch($query, $validated['search']))
                 ->when(array_key_exists('is_active', $validated), fn ($query) => $query->where('is_active', filter_var($validated['is_active'], FILTER_VALIDATE_BOOLEAN)))
                 ->orderBy('name'),
-            $filters,
+            $this->paginationFilters($filters),
             'inventory_products_page'
         );
     }
@@ -245,8 +245,7 @@ class InventoryService
             'has_stock' => 'nullable|string|in:true,false,1,0',
         ])->validate();
 
-        $query = Warehouse::query()
-            ->with(['stocks.product'])
+        $baseQuery = Warehouse::query()
             ->when(array_key_exists('has_stock', $validated), function ($query) use ($validated) {
                 $hasStock = filter_var($validated['has_stock'], FILTER_VALIDATE_BOOLEAN);
 
@@ -266,8 +265,17 @@ class InventoryService
             })
             ->orderBy('name');
 
-        $summaryRows = (clone $query)->get();
-        $result = ApiIndex::paginateOrGet($query, $filters, 'warehouses_page');
+        $summaryRows = (clone $baseQuery)->select('warehouses.*')->get();
+        $warehouseIds = $summaryRows->pluck('id')->all();
+        $stockSummary = $warehouseIds === []
+            ? collect()
+            : InventoryStock::query()
+                ->with('product')
+                ->whereIn('warehouse_id', $warehouseIds)
+                ->get();
+
+        $query = (clone $baseQuery)->with(['stocks.product']);
+        $result = ApiIndex::paginateOrGet($query, $this->paginationFilters($filters), 'warehouses_page');
         $warehouses = $result instanceof \Illuminate\Contracts\Pagination\LengthAwarePaginator
             ? collect($result->items())
             : $result;
@@ -278,16 +286,21 @@ class InventoryService
             $result->setCollection($data);
         }
 
+        $totalPhysicalStock = (int) $stockSummary->sum('physical_stock');
+        $totalAvailableStock = (int) $stockSummary->sum(fn (InventoryStock $stock) => $stock->available_stock);
+        $totalStockValue = round((float) $stockSummary->sum(fn (InventoryStock $stock) => $stock->physical_stock * (float) ($stock->product?->cost_price ?? 0)), 2);
+
         return [
             'data' => $result,
             'summary' => [
                 'total_warehouses' => $summaryRows->count(),
                 'active_warehouses' => $summaryRows->where('is_active', true)->count(),
-                'total_physical_stock' => (int) $summaryRows->sum(fn (Warehouse $warehouse) => $warehouse->stocks->sum('physical_stock')),
-                'total_available_stock' => (int) $summaryRows->sum(fn (Warehouse $warehouse) => $warehouse->stocks->sum(fn (InventoryStock $stock) => $stock->available_stock)),
-                'total_stock_value' => round((float) $summaryRows->sum(function (Warehouse $warehouse) {
-                    return $warehouse->stocks->sum(fn (InventoryStock $stock) => $stock->physical_stock * (float) ($stock->product?->cost_price ?? 0));
-                }), 2),
+                'total_physical_stock' => $totalPhysicalStock,
+                'total_available_stock' => $totalAvailableStock,
+                'total_stock_value' => $totalStockValue,
+                'stock_physical_total' => $totalPhysicalStock,
+                'stock_available_total' => $totalAvailableStock,
+                'stock_value_total' => $totalStockValue,
             ],
         ];
     }
@@ -395,6 +408,86 @@ class InventoryService
         return [
             'warehouse' => $warehouse,
             'data' => $products->map(fn (InventoryProduct $product) => $this->masterRow($product, $warehouse))->values(),
+        ];
+    }
+
+    public function stockEntryOptions(array $filters): array
+    {
+        $validated = Validator::make($filters, [
+            'warehouse_uid' => 'nullable|uuid',
+            'search' => 'nullable|string|max:255',
+            'is_active' => 'nullable|string|in:true,false,1,0',
+            'limit' => 'nullable|integer|min:1|max:1000',
+        ])->validate();
+
+        $warehouse = !empty($validated['warehouse_uid'])
+            ? $this->getWarehouseByUid($validated['warehouse_uid'])
+            : null;
+
+        $limit = (int) ($validated['limit'] ?? 500);
+        $isActive = array_key_exists('is_active', $validated)
+            ? filter_var($validated['is_active'], FILTER_VALIDATE_BOOLEAN)
+            : true;
+
+        $warehouses = Warehouse::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'uid', 'name', 'code', 'location'])
+            ->map(fn (Warehouse $warehouse) => [
+                'uid' => $warehouse->uid,
+                'name' => $warehouse->name,
+                'code' => $warehouse->code,
+                'location' => $warehouse->location,
+            ])
+            ->values();
+
+        $products = InventoryProduct::query()
+            ->with([
+                'category',
+                'stocks' => fn ($query) => $query
+                    ->when($warehouse, fn ($stockQuery) => $stockQuery->where('warehouse_id', $warehouse->getKey()))
+                    ->with('warehouse'),
+            ])
+            ->where('is_active', $isActive)
+            ->when(!empty($validated['search']), fn ($query) => $this->applyProductSearch($query, $validated['search']))
+            ->orderBy('name')
+            ->limit($limit)
+            ->get()
+            ->map(fn (InventoryProduct $product) => [
+                'uid' => $product->uid,
+                'sku' => $product->sku,
+                'name' => $product->name,
+                'category_uid' => $product->category?->uid,
+                'category_name' => $product->category?->name,
+                'unit_cost' => $product->unit_cost,
+                'sale_price' => $product->sale_price,
+                'is_active' => (bool) $product->is_active,
+                'stocks' => $product->stocks
+                    ->map(fn (InventoryStock $stock) => [
+                        'warehouse_uid' => $stock->warehouse?->uid,
+                        'warehouse_name' => $stock->warehouse?->name,
+                        'warehouse_code' => $stock->warehouse?->code,
+                        'physical_stock' => (int) $stock->physical_stock,
+                        'reserved_stock' => (int) $stock->reserved_stock,
+                        'available_stock' => (int) $stock->available_stock,
+                    ])
+                    ->values(),
+            ])
+            ->values();
+
+        return [
+            'filters' => [
+                'warehouse_uid' => $warehouse?->uid,
+                'search' => $validated['search'] ?? null,
+                'is_active' => $isActive,
+                'limit' => $limit,
+            ],
+            'warehouses' => $warehouses,
+            'products' => $products,
+            'summary' => [
+                'warehouses' => $warehouses->count(),
+                'products' => $products->count(),
+            ],
         ];
     }
 
@@ -991,6 +1084,11 @@ class InventoryService
             'warehouse_stocks.*.physical_stock' => 'required_without:warehouse_stocks.*.quantity|integer|min:0',
             'warehouse_stocks.*.quantity' => 'required_without:warehouse_stocks.*.physical_stock|integer|min:0',
         ])->validate();
+    }
+
+    private function paginationFilters(array $filters): array
+    {
+        return $filters + ['page' => 1, 'per_page' => ApiIndex::perPage($filters)];
     }
 
     private function validateExportPayload(array $payload): array

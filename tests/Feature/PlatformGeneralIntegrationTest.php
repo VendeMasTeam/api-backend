@@ -89,7 +89,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             ->assertJsonPath('data.features.custom_fields', false);
     }
 
-    public function test_auth_init_disables_tenant_modules_for_platform_admin_without_removing_permissions(): void
+    public function test_auth_init_separates_platform_admin_permissions_from_tenant_permissions(): void
     {
         foreach (['users.manage', 'admin.dashboard.read'] as $key) {
             Permission::query()->firstOrCreate(
@@ -122,8 +122,9 @@ class PlatformGeneralIntegrationTest extends TestCase
             ->assertJsonPath('data.modules.10.enabled', false)
             ->assertJsonPath('data.modules.10.permissions', []);
 
-        $this->assertContains('users.manage', $response->json('data.permissions.effective'));
-        $this->assertContains('admin.dashboard.read', $response->json('data.permissions.effective'));
+        $this->assertSame([], $response->json('data.permissions.effective'));
+        $this->assertContains('users.manage', $response->json('data.admin_permissions'));
+        $this->assertContains('admin.dashboard.read', $response->json('data.admin_permissions'));
     }
 
     public function test_auth_init_includes_sales_catalog_item(): void

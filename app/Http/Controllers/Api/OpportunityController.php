@@ -63,6 +63,11 @@ class OpportunityController extends Controller
         return $this->successResponse($this->opportunityService->opportunities($request->query()));
     }
 
+    public function history(Request $request)
+    {
+        return $this->successResponse($this->opportunityService->history($request->query()));
+    }
+
     public function store(Request $request)
     {
         try {
@@ -230,6 +235,17 @@ class OpportunityController extends Controller
     public function board(Request $request)
     {
         return $this->successResponse($this->opportunityService->board($request->query()));
+    }
+
+    public function reorderBoard(Request $request)
+    {
+        try {
+            return $this->successResponse($this->opportunityService->reorderBoard($request->all()), 200, 'Orden actualizado');
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        } catch (\Throwable $e) {
+            return $this->errorResponse('Server error', 500, ['server' => [$e->getMessage()]]);
+        }
     }
 
     public function summary()

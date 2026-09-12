@@ -22,6 +22,7 @@ class InventoryCategory extends Model
     protected $hidden = [
         'id',
         'tenant_id',
+        'key',
     ];
 
     public function products()

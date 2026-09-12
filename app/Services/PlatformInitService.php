@@ -116,9 +116,12 @@ class PlatformInitService
     public function init(User $user): array
     {
         $user->loadMissing(['tenant.plan', 'tenant.currency', 'roles', 'permissions', 'adminRoles']);
-        $effectivePermissions = $user->effectivePermissions();
+        $isPlatformSession = $user->is_platform_admin && $user->tenant_id === null;
+        $effectivePermissions = $isPlatformSession
+            ? collect()
+            : $user->effectivePermissions();
 
-        if (! $user->is_platform_admin && $user->tenant) {
+        if (! $isPlatformSession && $user->tenant) {
             $effectivePermissions = $this->planPermissionService->filterPermissionsForTenant($effectivePermissions, $user->tenant);
         }
 
@@ -128,7 +131,7 @@ class PlatformInitService
         // Si es superadmin, incluir permisos de admin_roles
         $adminRolesData = [];
         $adminPermissions = [];
-        if ($user->is_platform_admin && $user->tenant_id === null) {
+        if ($isPlatformSession) {
             $adminRolesData = $user->adminRoles->map(fn ($r) => [
                 'uid' => $r->uid,
                 'name' => $r->name,

@@ -109,6 +109,82 @@ class OpportunityService
         return $this->mapOpportunityIndexResult($result);
     }
 
+    public function history(array $filters = [])
+    {
+        $validated = Validator::make($filters, [
+            'stage_uid' => 'nullable|uuid',
+            'owner_user_uid' => 'nullable|uuid',
+            'search' => 'nullable|string|max:255',
+            'origin' => 'nullable|string|max:255',
+            'status' => 'nullable|string|in:active,open,closed,won,lost',
+            'created_from' => 'nullable|date',
+            'created_to' => 'nullable|date',
+            'closed_from' => 'nullable|date',
+            'closed_to' => 'nullable|date',
+        ])->validate();
+
+        $query = Opportunity::query()
+            ->with(['stage', 'owner', 'customFieldValues.customField']);
+
+        if (! empty($validated['stage_uid'])) {
+            $stage = OpportunityStage::query()->where('uid', $validated['stage_uid'])->first();
+            $query->where('stage_id', $stage?->getKey() ?: 0);
+        }
+
+        if (! empty($validated['owner_user_uid'])) {
+            $ownerId = User::query()->where('uid', $validated['owner_user_uid'])->value('id');
+            $query->where('owner_user_id', $ownerId ?: 0);
+        }
+
+        if (! empty($validated['search'])) {
+            $this->applyOpportunitySearch($query, $validated['search']);
+        }
+
+        if (! empty($validated['origin'])) {
+            $this->applyOpportunityOriginFilter($query, $validated['origin']);
+        }
+
+        match ($validated['status'] ?? null) {
+            'active', 'open' => $query->whereNull('won_at')->whereNull('lost_at'),
+            'closed' => $this->applyClosedOpportunityFilter($query),
+            'won' => $query->whereNotNull('won_at')->whereNull('lost_at'),
+            'lost' => $query->whereNotNull('lost_at'),
+            default => null,
+        };
+
+        if (! empty($validated['created_from'])) {
+            $query->whereDate('created_at', '>=', $validated['created_from']);
+        }
+
+        if (! empty($validated['created_to'])) {
+            $query->whereDate('created_at', '<=', $validated['created_to']);
+        }
+
+        if (! empty($validated['closed_from'])) {
+            $query->where(function ($closedQuery) use ($validated) {
+                $closedQuery
+                    ->whereDate('won_at', '>=', $validated['closed_from'])
+                    ->orWhereDate('lost_at', '>=', $validated['closed_from']);
+            });
+        }
+
+        if (! empty($validated['closed_to'])) {
+            $query->where(function ($closedQuery) use ($validated) {
+                $closedQuery
+                    ->whereDate('won_at', '<=', $validated['closed_to'])
+                    ->orWhereDate('lost_at', '<=', $validated['closed_to']);
+            });
+        }
+
+        $result = ApiIndex::paginateOrGet(
+            $query->orderByRaw('COALESCE(won_at, lost_at, created_at) DESC')->orderByDesc('id'),
+            $filters + ['page' => 1, 'per_page' => ApiIndex::perPage($filters)],
+            'opportunities_history_page'
+        );
+
+        return $this->mapOpportunityIndexResult($result);
+    }
+
     public function getOpportunity(string $uid): Opportunity
     {
         return Opportunity::query()
@@ -156,6 +232,7 @@ class OpportunityService
                 'description' => $validated['description'] ?? null,
                 'won_at' => $this->isWonClosingStage($stage) ? now() : null,
                 'lost_at' => $stage->is_lost ? now() : null,
+                'kanban_position' => $this->nextKanbanPosition($stage->getKey()),
             ]);
 
             $this->assignCustomFieldValues($opportunity, $validated['custom_fields'] ?? []);
@@ -187,6 +264,7 @@ class OpportunityService
                 $payload['stage_id'] = $stage->getKey();
                 $payload['won_at'] = $this->isWonClosingStage($stage) ? now() : null;
                 $payload['lost_at'] = $stage->is_lost ? now() : null;
+                $payload['kanban_position'] = $this->nextKanbanPosition($stage->getKey());
             }
 
             if (array_key_exists('owner_user_uid', $validated)) {
@@ -227,6 +305,7 @@ class OpportunityService
                 'stage_id' => $stage?->getKey() ?? $opportunity->stage_id,
                 'won_at' => now(),
                 'lost_at' => null,
+                'kanban_position' => $this->nextKanbanPosition($stage?->getKey() ?? $opportunity->stage_id),
             ]);
 
             $project = $this->projectService->createFromOpportunityModel($opportunity->fresh(['opportunityable']), quietIfNoAccount: true);
@@ -296,6 +375,7 @@ class OpportunityService
                 'stage_id' => $stage?->getKey() ?? $opportunity->stage_id,
                 'won_at' => null,
                 'lost_at' => now(),
+                'kanban_position' => $this->nextKanbanPosition($stage?->getKey() ?? $opportunity->stage_id),
             ]);
 
             $reasons = $validated['lost_reasons'] ?? $validated['reasons'] ?? [];
@@ -474,7 +554,14 @@ class OpportunityService
             $this->applyOpportunityProductFilter($opportunityQuery, $validated['product']);
         }
 
-        $result = ApiIndex::paginateOrGet($opportunityQuery->latest(), $filters, 'opportunities_board_page');
+        $result = ApiIndex::paginateOrGet(
+            $opportunityQuery
+                ->orderBy('stage_id')
+                ->orderBy('kanban_position')
+                ->orderByDesc('created_at'),
+            $filters,
+            'opportunities_board_page'
+        );
         $closingStage = $this->resolveClosingStageFromCollection($stages);
         $lostStage = $this->resolveLostStageFromCollection($stages);
         $items = collect(method_exists($result, 'items') ? $result->items() : $result)
@@ -518,6 +605,54 @@ class OpportunityService
         }
 
         return $payload;
+    }
+
+    public function reorderBoard(array $data): array
+    {
+        $validated = Validator::make($data, [
+            'stage_uid' => 'required|uuid',
+            'ordered_opportunity_uids' => 'required_without:opportunity_uids|array|min:1',
+            'ordered_opportunity_uids.*' => 'uuid',
+            'opportunity_uids' => 'required_without:ordered_opportunity_uids|array|min:1',
+            'opportunity_uids.*' => 'uuid',
+        ])->validate();
+
+        $stage = $this->resolveStage($validated['stage_uid']);
+        $orderedUids = array_values(array_unique($validated['ordered_opportunity_uids'] ?? $validated['opportunity_uids']));
+
+        return DB::transaction(function () use ($stage, $orderedUids) {
+            $requested = Opportunity::query()
+                ->where('stage_id', $stage->getKey())
+                ->whereIn('uid', $orderedUids)
+                ->get(['id', 'uid']);
+
+            if ($requested->count() !== count($orderedUids)) {
+                throw ValidationException::withMessages([
+                    'ordered_opportunity_uids' => ['Todas las oportunidades deben existir y pertenecer a la etapa enviada'],
+                ]);
+            }
+
+            $remaining = Opportunity::query()
+                ->where('stage_id', $stage->getKey())
+                ->whereNotIn('uid', $orderedUids)
+                ->orderBy('kanban_position')
+                ->orderByDesc('created_at')
+                ->pluck('uid')
+                ->all();
+
+            $finalOrder = array_values(array_merge($orderedUids, $remaining));
+
+            foreach ($finalOrder as $position => $uid) {
+                Opportunity::query()
+                    ->where('uid', $uid)
+                    ->update(['kanban_position' => $position + 1]);
+            }
+
+            return [
+                'stage_uid' => $stage->uid,
+                'ordered_opportunity_uids' => $finalOrder,
+            ];
+        });
     }
 
     private function mapOpportunityIndexResult($result)
@@ -564,6 +699,10 @@ class OpportunityService
             'opportunityable_type' => $opportunity->opportunityable_type,
             'opportunityable_uid' => $this->resolveMorphUid($opportunity->opportunityable_type, $opportunity->opportunityable_id),
             'custom_fields' => $opportunity->custom_fields,
+            'kanban_position' => (int) $opportunity->kanban_position,
+            'is_closed' => (bool) ($opportunity->won_at || $opportunity->lost_at),
+            'closed_status' => $opportunity->lost_at ? 'lost' : ($opportunity->won_at ? 'won' : null),
+            'closed_at' => $opportunity->lost_at ?? $opportunity->won_at,
             'won_at' => $opportunity->won_at,
             'lost_at' => $opportunity->lost_at,
             'created_at' => $opportunity->created_at,
@@ -866,6 +1005,13 @@ class OpportunityService
                     $lostQuery->whereNotNull('lost_at')->where('lost_at', '>=', $closedSince);
                 });
         });
+    }
+
+    private function nextKanbanPosition(int $stageId): int
+    {
+        return ((int) Opportunity::query()
+            ->where('stage_id', $stageId)
+            ->max('kanban_position')) + 1;
     }
 
     public function summary(): array

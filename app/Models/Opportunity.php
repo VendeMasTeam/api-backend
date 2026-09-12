@@ -29,6 +29,7 @@ class Opportunity extends Model
         'description',
         'won_at',
         'lost_at',
+        'kanban_position',
     ];
 
     protected $hidden = [
@@ -52,6 +53,7 @@ class Opportunity extends Model
         'expected_close_date' => 'date',
         'won_at' => 'datetime',
         'lost_at' => 'datetime',
+        'kanban_position' => 'integer',
     ];
 
     public function owner()

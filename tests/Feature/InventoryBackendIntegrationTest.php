@@ -227,13 +227,13 @@ class InventoryBackendIntegrationTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('data.name', 'Materia Prima')
-            ->assertJsonPath('data.key', 'materia_prima');
+            ->assertJsonMissingPath('data.key');
 
         $second = $this->postJson('/api/inventory/categories', [
             'name' => 'Materia Prima',
         ])
             ->assertCreated()
-            ->assertJsonPath('data.key', 'materia_prima_2')
+            ->assertJsonMissingPath('data.key')
             ->json('data');
 
         $this->putJson('/api/inventory/categories/'.$second['uid'], [
@@ -241,7 +241,7 @@ class InventoryBackendIntegrationTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.name', 'Materia Prima Actualizada')
-            ->assertJsonPath('data.key', 'materia_prima_2');
+            ->assertJsonMissingPath('data.key');
     }
 
     public function test_warehouses_are_paginated_with_global_summary(): void
@@ -292,7 +292,71 @@ class InventoryBackendIntegrationTest extends TestCase
             ->assertJsonPath('summary.active_warehouses', 2)
             ->assertJsonPath('summary.total_physical_stock', 10)
             ->assertJsonPath('summary.total_available_stock', 8)
-            ->assertJsonPath('summary.total_stock_value', 1000);
+            ->assertJsonPath('summary.total_stock_value', 1000)
+            ->assertJsonPath('summary.stock_physical_total', 10)
+            ->assertJsonPath('summary.stock_available_total', 8)
+            ->assertJsonPath('summary.stock_value_total', 1000);
+    }
+
+    public function test_products_are_paginated_by_default_for_inventory_listing(): void
+    {
+        $this->authenticateWithPermissions(['inventory.read']);
+
+        foreach (range(1, 30) as $index) {
+            InventoryProduct::query()->create([
+                'sku' => 'SKU-PAG-'.$index,
+                'name' => 'Producto Paginado '.$index,
+                'is_active' => true,
+            ]);
+        }
+
+        $this->getJson('/api/inventory/products')
+            ->assertOk()
+            ->assertJsonCount(25, 'data')
+            ->assertJsonPath('meta.pagination.total', 30)
+            ->assertJsonPath('meta.pagination.per_page', 25);
+
+        $this->getJson('/api/inventory/products?page=2&per_page=10')
+            ->assertOk()
+            ->assertJsonCount(10, 'data')
+            ->assertJsonPath('meta.pagination.current_page', 2)
+            ->assertJsonPath('meta.pagination.per_page', 10);
+    }
+
+    public function test_stock_entry_options_returns_products_and_warehouses_in_one_request(): void
+    {
+        $user = $this->authenticateWithPermissions(['inventory.read']);
+
+        $warehouse = Warehouse::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Bodega Central',
+            'code' => 'BCN01',
+            'is_active' => true,
+        ]);
+
+        $product = InventoryProduct::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'sku' => 'SKU-ENTRY',
+            'name' => 'Producto Entrada',
+            'cost_price' => 100,
+            'sale_price' => 150,
+            'is_active' => true,
+        ]);
+
+        InventoryStock::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'product_id' => $product->getKey(),
+            'warehouse_id' => $warehouse->getKey(),
+            'physical_stock' => 5,
+            'reserved_stock' => 1,
+        ]);
+
+        $this->getJson('/api/inventory/stock/entry-options?warehouse_uid='.$warehouse->uid)
+            ->assertOk()
+            ->assertJsonPath('data.warehouses.0.uid', $warehouse->uid)
+            ->assertJsonPath('data.products.0.uid', $product->uid)
+            ->assertJsonPath('data.products.0.stocks.0.available_stock', 4)
+            ->assertJsonPath('data.summary.products', 1);
     }
 
     public function test_bulk_adjust_and_movements_summary_match_inventory_document(): void

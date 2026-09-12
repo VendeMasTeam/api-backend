@@ -260,6 +260,7 @@ Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.sche
         Route::get('/availability', [InventoryController::class, 'availability'])->middleware('permission:inventory.read');
         Route::get('/movements/summary', [InventoryController::class, 'movementsSummary'])->middleware('permission:inventory.read');
         Route::get('/movements', [InventoryController::class, 'movements'])->middleware('permission:inventory.read');
+        Route::get('/stock/entry-options', [InventoryController::class, 'stockEntryOptions'])->middleware('permission:inventory.read');
         Route::post('/stocks/adjust/bulk', [InventoryController::class, 'adjustBulk'])->middleware('permission:inventory.manage');
         Route::post('/stocks/adjust', [InventoryController::class, 'adjust'])->middleware('permission:inventory.manage');
         Route::post('/reservations', [InventoryController::class, 'reserve'])->middleware('permission:inventory.reserve');
@@ -444,6 +445,8 @@ Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.sche
         Route::put('/stages/{uid}', [OpportunityController::class, 'updateStage'])->middleware('permission:opportunities.manage');
         Route::delete('/stages/{uid}', [OpportunityController::class, 'destroyStage'])->middleware('permission:opportunities.manage');
         Route::get('/board', [OpportunityController::class, 'board'])->middleware('permission:opportunities.read');
+        Route::post('/board/reorder', [OpportunityController::class, 'reorderBoard'])->middleware('permission:opportunities.manage');
+        Route::get('/history', [OpportunityController::class, 'history'])->middleware('permission:opportunities.read');
         Route::get('/summary', [OpportunityController::class, 'summary'])->middleware('permission:opportunities.read');
         Route::get('/template', [OpportunityController::class, 'template'])->middleware('permission:opportunities.read');
         Route::post('/import', [OpportunityController::class, 'import'])->middleware('permission:opportunities.manage');

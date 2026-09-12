@@ -115,10 +115,12 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->timestamp('won_at')->nullable();
             $table->timestamp('lost_at')->nullable();
+            $table->unsignedInteger('kanban_position')->default(0);
             $table->timestamps();
 
             $table->index(['opportunityable_type', 'opportunityable_id']);
             $table->index(['tenant_id', 'lead_origin'], 'opportunities_tenant_lead_origin_idx');
+            $table->index(['tenant_id', 'stage_id', 'kanban_position'], 'opportunities_tenant_stage_kanban_idx');
         });
 
         Schema::create('tasks', function (Blueprint $table) {

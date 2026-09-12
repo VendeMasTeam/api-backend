@@ -62,6 +62,108 @@ class MissingBackendItemsIntegrationTest extends TestCase
             ->assertJsonPath('data.pagination.total', 2);
     }
 
+    public function test_opportunity_board_can_be_reordered_inside_stage(): void
+    {
+        $user = $this->authenticateWithPermissions(['opportunities.read', 'opportunities.manage']);
+        $stage = OpportunityStage::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Negociacion',
+            'key' => 'negociacion-reorder',
+            'position' => 1,
+            'is_active' => true,
+        ]);
+
+        $first = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $stage->getKey(),
+            'title' => 'Primera',
+            'amount' => 100,
+            'kanban_position' => 1,
+        ]);
+        $second = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $stage->getKey(),
+            'title' => 'Segunda',
+            'amount' => 200,
+            'kanban_position' => 2,
+        ]);
+
+        $this->postJson('/api/opportunities/board/reorder', [
+            'stage_uid' => $stage->uid,
+            'ordered_opportunity_uids' => [$second->uid, $first->uid],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.ordered_opportunity_uids.0', $second->uid)
+            ->assertJsonPath('data.ordered_opportunity_uids.1', $first->uid);
+
+        $this->getJson('/api/opportunities/board')
+            ->assertOk()
+            ->assertJsonPath('data.stages.0.items.0.uid', $second->uid)
+            ->assertJsonPath('data.stages.0.items.0.kanban_position', 1)
+            ->assertJsonPath('data.stages.0.items.1.uid', $first->uid)
+            ->assertJsonPath('data.stages.0.items.1.kanban_position', 2);
+    }
+
+    public function test_opportunity_board_shows_recent_closed_and_history_lists_all(): void
+    {
+        $user = $this->authenticateWithPermissions(['opportunities.read']);
+        $activeStage = OpportunityStage::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Leads',
+            'key' => 'leads-history',
+            'position' => 1,
+            'is_active' => true,
+        ]);
+        $wonStage = OpportunityStage::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Cerrador',
+            'key' => 'cerrador',
+            'position' => 2,
+            'is_won' => true,
+            'is_active' => true,
+        ]);
+
+        $recentClosed = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $wonStage->getKey(),
+            'title' => 'Cerrada reciente',
+            'amount' => 300,
+            'won_at' => now()->subDays(2),
+        ]);
+        $oldClosed = Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $wonStage->getKey(),
+            'title' => 'Cerrada antigua',
+            'amount' => 400,
+            'won_at' => now()->subDays(10),
+        ]);
+        Opportunity::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'stage_id' => $activeStage->getKey(),
+            'title' => 'Activa',
+            'amount' => 500,
+        ]);
+
+        $board = $this->getJson('/api/opportunities/board?closed_days=7')
+            ->assertOk()
+            ->json('data.stages');
+        $boardUids = collect($board)->flatMap(fn (array $stage) => collect($stage['items'])->pluck('uid'));
+
+        $this->assertTrue($boardUids->contains($recentClosed->uid));
+        $this->assertFalse($boardUids->contains($oldClosed->uid));
+
+        $this->getJson('/api/opportunities/history?status=closed&page=1&per_page=10')
+            ->assertOk()
+            ->assertJsonPath('meta.pagination.total', 2)
+            ->assertJsonFragment(['uid' => $oldClosed->uid])
+            ->assertJsonFragment(['uid' => $recentClosed->uid]);
+    }
+
     public function test_tasks_are_paginated_by_default(): void
     {
         $user = $this->authenticateWithPermissions(['tasks.read']);

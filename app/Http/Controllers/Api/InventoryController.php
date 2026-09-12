@@ -151,4 +151,13 @@ class InventoryController extends Controller
             return $this->errorResponse('Validation error', 422, $e->errors());
         }
     }
+
+    public function stockEntryOptions(Request $request)
+    {
+        try {
+            return $this->successResponse($this->inventoryService->stockEntryOptions($request->query()));
+        } catch (ValidationException $e) {
+            return $this->errorResponse('Validation error', 422, $e->errors());
+        }
+    }
 }
