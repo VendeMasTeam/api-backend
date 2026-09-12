@@ -187,7 +187,7 @@ Artisan::command('tenants:schemas:provision {--tenant_uid=} {--dry-run}', functi
     return 0;
 })->purpose('Create or backfill PostgreSQL schemas for tenants without switching runtime tenancy mode');
 
-Artisan::command('tenants:migrate {--tenant_uid=} {--path=database/migrations/tenant} {--pretend}', function () {
+Artisan::command('tenants:migrate {--tenant_uid=} {--path=database/migrations/tenant} {--pretend} {--force}', function () {
     $tenantUid = $this->option('tenant_uid');
     $path = (string) $this->option('path');
     $pretend = (bool) $this->option('pretend');
