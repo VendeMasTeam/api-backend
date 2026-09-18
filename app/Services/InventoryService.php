@@ -400,7 +400,7 @@ class InventoryService
             ->values();
 
         $result = $rows;
-        if (ApiIndex::shouldPaginate($filters)) {
+        if (($validated['paginate'] ?? null) !== false && ApiIndex::shouldPaginate($filters)) {
             $page = ApiIndex::page($filters);
             $perPage = ApiIndex::perPage($filters);
             $result = new LengthAwarePaginator(
@@ -1031,7 +1031,7 @@ class InventoryService
 
     public function report(array $filters): array
     {
-        $master = $this->master($filters);
+        $master = $this->master(array_merge($filters, ['paginate' => false]));
         $rows = collect($master['data']);
         $summaryByCategory = $rows
             ->groupBy(fn (array $row) => $row['category_name'] ?? 'Sin categoria')

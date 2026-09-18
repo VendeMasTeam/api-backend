@@ -86,7 +86,7 @@ class ReportService
 
         $legacyReport = $this->inventoryService->report($inventoryFilters);
         $rows = collect($legacyReport['critical_products'])
-            ->merge(collect($this->inventoryService->master($inventoryFilters)['data'])->whereNotIn('stock_state', ['low', 'out']))
+            ->merge(collect($this->inventoryService->master(array_merge($inventoryFilters, ['paginate' => false]))['data'])->whereNotIn('stock_state', ['low', 'out']))
             ->unique('uid')
             ->values();
 

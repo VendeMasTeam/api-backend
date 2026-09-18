@@ -103,6 +103,11 @@ class ReportsBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.rupture_risk.critical_products_count', 1)
             ->assertJsonPath('data.table_data.0.producto', 'Producto Critico');
 
+        $this->getJson('/api/reports/inventory?tab=warehouse&period=Este mes')
+            ->assertOk()
+            ->assertJsonPath('data.kpis.Productos', 1)
+            ->assertJsonPath('data.chart_data.categories.0', 'Bodega Principal');
+
         $this->getJson('/api/reports/filters')
             ->assertOk()
             ->assertJsonPath('data.warehouses.0.value', $warehouse->uid)
