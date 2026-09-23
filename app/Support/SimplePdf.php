@@ -185,7 +185,7 @@ class SimplePdf
     private static function pageFooter(int $page): string
     {
         return "q\n0.82 0.88 0.94 RG\n44 45 m 568 45 l S\nQ\n"
-            .self::text(44, 30, 'Archivo generado por Vende Mas', 8, 'F2', '0.46 0.52 0.60')
+            .self::text(44, 30, 'Archivo generado por '.app(\App\Services\PlatformBrandingService::class)->get()['name'], 8, 'F2', '0.46 0.52 0.60')
             .self::text(520, 30, 'Pagina '.$page, 8, 'F2', '0.46 0.52 0.60');
     }
 

@@ -12,6 +12,8 @@ class QuotationPdfService
     private const MARGIN = 42;
     private const BODY_BOTTOM = 82;
 
+    public function __construct(private readonly PlatformBrandingService $platformBrandingService) {}
+
     public function render(Quotation $quotation): string
     {
         $quotation->loadMissing([
@@ -84,7 +86,7 @@ class QuotationPdfService
     private function pageHeader(Quotation $quotation, int $page): string
     {
         $tenant = $quotation->tenant;
-        $companyName = $tenant?->name ?: 'Vende Mas';
+        $companyName = $tenant?->name ?: $this->platformBrandingService->get()['name'];
         $quoteNumber = $quotation->quote_number ?: $quotation->uid;
         $client = $quotation->quoteable;
         $clientName = $quotation->client_name ?: 'Cliente';
@@ -193,7 +195,7 @@ class QuotationPdfService
     {
         return $this->line(42, 56, 570, 56, '0.82 0.88 0.94')
             . $this->text(42, 38, 'Gracias por su confianza. Esta cotizacion esta sujeta a disponibilidad y condiciones comerciales.', 7.6, 'F2', '0.45 0.50 0.58')
-            . $this->text(42, 26, 'Archivo generado por Vende Mas ', 7.2, 'F2', '0.45 0.50 0.58');
+            . $this->text(42, 26, 'Archivo generado por '.$this->platformBrandingService->get()['name'], 7.2, 'F2', '0.45 0.50 0.58');
     }
 
     private function panel(int $x, int $y, int $width, int $height, string $title): string

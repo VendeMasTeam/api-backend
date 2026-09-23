@@ -54,7 +54,7 @@ services:
       - "traefik.http.routers.api-legacy-ops.priority=200"
       - "traefik.http.routers.api-legacy-ops.middlewares=api-legacy-add-prefix"
       - "traefik.http.routers.api-legacy-ops.service=api"
-      - "traefik.http.routers.api-legacy-extra.rule=Host(`vende-mas.com.co`) && HeaderRegexp(`Accept`, `.*application/json.*`) && (PathPrefix(`/automation`) || PathPrefix(`/commissions`) || PathPrefix(`/partners`) || PathPrefix(`/competitive-intelligence`) || PathPrefix(`/dashboard`) || PathPrefix(`/schedule`) || PathPrefix(`/settings`) || PathPrefix(`/reports`) || PathPrefix(`/metrics`) || PathPrefix(`/logs`) || PathPrefix(`/rbac`) || PathPrefix(`/search`) || PathPrefix(`/support`))"
+      - "traefik.http.routers.api-legacy-extra.rule=Host(`vende-mas.com.co`) && HeaderRegexp(`Accept`, `.*application/json.*`) && (PathPrefix(`/automation`) || PathPrefix(`/commissions`) || PathPrefix(`/partners`) || PathPrefix(`/partner-resources`) || PathPrefix(`/competitive-intelligence`) || PathPrefix(`/lost-reasons`) || PathPrefix(`/expenses`) || PathPrefix(`/purchases`) || PathPrefix(`/custom-fields`) || PathPrefix(`/dashboard`) || PathPrefix(`/schedule`) || PathPrefix(`/settings`) || PathPrefix(`/reports`) || PathPrefix(`/metrics`) || PathPrefix(`/logs`) || PathPrefix(`/rbac`) || PathPrefix(`/search`) || PathPrefix(`/support`))"
       - "traefik.http.routers.api-legacy-extra.entrypoints=websecure"
       - "traefik.http.routers.api-legacy-extra.tls.certresolver=letsencrypt"
       - "traefik.http.routers.api-legacy-extra.priority=200"

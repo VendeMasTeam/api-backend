@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\OpportunityController;
 use App\Http\Controllers\Api\PartnerController;
 use App\Http\Controllers\Api\PartnerResourceController;
 use App\Http\Controllers\Api\PlanController;
+use App\Http\Controllers\Api\PlatformBrandingController;
 use App\Http\Controllers\Api\PriceBookController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProjectController;
@@ -64,6 +65,7 @@ use Illuminate\Support\Facades\Route;
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::get('/platform/branding', [PlatformBrandingController::class, 'show']);
 
 /*
 |--------------------------------------------------------------------------
@@ -602,6 +604,7 @@ Route::middleware(['auth:sanctum', 'tenant.active', 'tenant.token', 'tenant.sche
 });
 
 Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('admin')->group(function () {
+    Route::post('/branding', [PlatformBrandingController::class, 'update'])->middleware('platform.permission:admin.tenants.manage');
     Route::get('/dashboard', [AdminDashboardController::class, 'index'])->middleware('permission:admin.dashboard.read');
     Route::get('/plan-modules', [PlanController::class, 'modules'])->middleware('permission:plans.manage');
 

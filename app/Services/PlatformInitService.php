@@ -110,9 +110,10 @@ class PlatformInitService
         ],
     ];
 
-    public function __construct(private readonly PlanPermissionService $planPermissionService)
-    {
-    }
+    public function __construct(
+        private readonly PlanPermissionService $planPermissionService,
+        private readonly PlatformBrandingService $platformBrandingService
+    ) {}
 
     public function init(User $user): array
     {
@@ -165,6 +166,7 @@ class PlatformInitService
             ],
             'modules' => $this->modules($effectivePermissionKeys, (bool) $user->is_platform_admin, $featureFlags),
             'features' => $featureFlags ?? $this->defaultFeatureFlags(),
+            'branding' => $this->platformBrandingService->get(),
             'localization' => $this->localization($user),
             'permissions' => $this->permissionsPayload($effectivePermissionKeys),
             'admin_permissions' => $adminPermissions,
