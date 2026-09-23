@@ -10,7 +10,7 @@ class ContactRepository
     public function all(array $filters = [])
     {
         $query = Contact::query()
-            ->with(['account.owner', 'owner'])
+            ->with(['account.owner', 'owner', 'tags'])
             ->orderBy('first_name')
             ->orderBy('last_name');
 
@@ -48,7 +48,7 @@ class ContactRepository
 
     public function findByUid(string $uid)
     {
-        return Contact::with(['account.owner', 'owner'])->where('uid', $uid)->firstOrFail();
+        return Contact::with(['account.owner', 'owner', 'tags'])->where('uid', $uid)->firstOrFail();
     }
 
     public function create(array $data)
@@ -70,7 +70,7 @@ class ContactRepository
 
         $contact->update($data);
 
-        return $contact->fresh('account');
+        return $contact->fresh(['account', 'tags']);
     }
 
     public function delete(string $uid)

@@ -13,8 +13,10 @@ use App\Models\PriceBook;
 use App\Models\Product;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
+use App\Models\User;
 use App\Models\Warehouse;
 use App\Support\ApiIndex;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -29,7 +31,8 @@ class QuotationService
         private readonly CreditService $creditService,
         private readonly DocumentValidationService $documentValidationService,
         private readonly ProductService $productService,
-        private readonly DependencyService $dependencyService
+        private readonly DependencyService $dependencyService,
+        private readonly CurrencyService $currencyService
     ) {}
 
     public function getAll(array $filters = [])
@@ -108,6 +111,10 @@ class QuotationService
                 $this->ensureDocumentsReady($quoteable);
             }
 
+            $localCurrency = strtoupper($validated['local_currency'] ?? (auth()->user()?->tenant?->currency?->code ?? 'COP'));
+            $currency = strtoupper($validated['currency'] ?? $localCurrency);
+            $exchangeRate = $validated['exchange_rate'] ?? $this->resolveExchangeRate($currency, $localCurrency);
+
             $quotation = Quotation::query()->create([
                 'owner_user_id' => $quoteable?->owner_user_id ?? auth()->id(),
                 'created_by_user_id' => auth()->id(),
@@ -117,9 +124,9 @@ class QuotationService
                 'quote_number' => $validated['quote_number'] ?? $this->generateQuoteNumber(),
                 'title' => $validated['title'],
                 'status' => $validated['status'] ?? 'draft',
-                'currency' => $validated['currency'] ?? null,
-                'exchange_rate' => $validated['exchange_rate'] ?? 1,
-                'local_currency' => $validated['local_currency'] ?? (auth()->user()?->tenant?->currency?->code ?? 'COP'),
+                'currency' => $currency,
+                'exchange_rate' => $exchangeRate,
+                'local_currency' => $localCurrency,
                 'valid_until' => $validated['valid_until'] ?? null,
                 'notes' => $validated['notes'] ?? null,
             ]);
@@ -146,6 +153,13 @@ class QuotationService
                 if (array_key_exists($field, $validated)) {
                     $payload[$field] = $validated[$field];
                 }
+            }
+
+            if (! array_key_exists('exchange_rate', $validated)
+                && (array_key_exists('currency', $validated) || array_key_exists('local_currency', $validated))) {
+                $currency = strtoupper($payload['currency'] ?? $quotation->currency ?? $quotation->local_currency ?? 'COP');
+                $localCurrency = strtoupper($payload['local_currency'] ?? $quotation->local_currency ?? 'COP');
+                $payload['exchange_rate'] = $this->resolveExchangeRate($currency, $localCurrency);
             }
 
             if (array_key_exists('price_book_uid', $validated)) {
@@ -191,6 +205,19 @@ class QuotationService
     {
         if ($entity instanceof Account) {
             $this->documentValidationService->ensureReadyForAccount($entity);
+        }
+    }
+
+    private function resolveExchangeRate(string $currency, string $localCurrency): float
+    {
+        if ($currency === $localCurrency) {
+            return 1.0;
+        }
+
+        try {
+            return $this->currencyService->getRate($currency, $localCurrency);
+        } catch (ValidationException) {
+            return 1.0;
         }
     }
 
@@ -494,8 +521,8 @@ class QuotationService
             'local_currency' => $quotation->local_currency,
             'valid_until' => $quotation->valid_until,
             'notes' => $quotation->notes,
-            'owner_user_uid' => $this->resolveModelUid(\App\Models\User::class, $quotation->owner_user_id),
-            'created_by_user_uid' => $this->resolveModelUid(\App\Models\User::class, $quotation->created_by_user_id),
+            'owner_user_uid' => $this->resolveModelUid(User::class, $quotation->owner_user_id),
+            'created_by_user_uid' => $this->resolveModelUid(User::class, $quotation->created_by_user_id),
             'price_book_uid' => $quotation->priceBook?->uid,
             'quoteable_type' => $quotation->quoteable_type,
             'quoteable_uid' => $this->resolveModelUid($quotation->quoteable_type, $quotation->quoteable_id),
@@ -547,7 +574,7 @@ class QuotationService
 
     private function resolveModelUid(?string $class, ?int $id): ?string
     {
-        if (! $class || ! $id || ! is_subclass_of($class, \Illuminate\Database\Eloquent\Model::class)) {
+        if (! $class || ! $id || ! is_subclass_of($class, Model::class)) {
             return null;
         }
 
@@ -556,7 +583,7 @@ class QuotationService
 
     private function resolveQuoteableName(Quotation $quotation): ?string
     {
-        if (! $quotation->quoteable_type || ! $quotation->quoteable_id || ! is_subclass_of($quotation->quoteable_type, \Illuminate\Database\Eloquent\Model::class)) {
+        if (! $quotation->quoteable_type || ! $quotation->quoteable_id || ! is_subclass_of($quotation->quoteable_type, Model::class)) {
             return $quotation->title ?? $quotation->quote_number;
         }
 

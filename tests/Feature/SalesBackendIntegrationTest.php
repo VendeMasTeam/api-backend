@@ -15,7 +15,6 @@ use App\Models\Opportunity;
 use App\Models\OpportunityStage;
 use App\Models\Permission;
 use App\Models\Product;
-use App\Models\Project;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\Task;
@@ -567,6 +566,36 @@ class SalesBackendIntegrationTest extends TestCase
 
         $second->assertCreated()
             ->assertJsonPath('data.quote_number', 'COT-'.$year.'-002');
+    }
+
+    public function test_quotation_resolves_latest_exchange_rate_when_frontend_omits_it(): void
+    {
+        $user = $this->authenticateWithPermissions(['quotations.create']);
+
+        ExchangeRate::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'from_currency' => 'USD',
+            'to_currency' => 'COP',
+            'rate' => 4100,
+            'rate_date' => now()->subDay()->toDateString(),
+        ]);
+        ExchangeRate::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'from_currency' => 'USD',
+            'to_currency' => 'COP',
+            'rate' => 4200,
+            'rate_date' => now()->toDateString(),
+        ]);
+
+        $this->postJson('/api/quotations', [
+            'title' => 'Cotizacion multimoneda',
+            'currency' => 'USD',
+            'local_currency' => 'COP',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.currency', 'USD')
+            ->assertJsonPath('data.local_currency', 'COP')
+            ->assertJsonPath('data.exchange_rate', 4200);
     }
 
     public function test_quotation_creation_accepts_frontend_empty_uids_and_resolves_items_by_sku(): void

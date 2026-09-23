@@ -54,4 +54,9 @@ class Tag extends Model
     {
         return $this->morphedByMany(CrmEntity::class, 'taggable')->withTimestamps();
     }
+
+    public function opportunities()
+    {
+        return $this->morphedByMany(Opportunity::class, 'taggable')->withTimestamps();
+    }
 }

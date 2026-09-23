@@ -22,15 +22,23 @@ class PlatformBrandingService
     public function update(array $data, array $files = []): array
     {
         $files = collect($files)->filter(fn ($file) => $file instanceof UploadedFile)->all();
-        $validated = Validator::make(array_merge($data, $files), [
+        $validator = Validator::make(array_merge($data, $files), [
             'name' => 'sometimes|string|min:1|max:120',
             'logo_light' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
             'logo_dark' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
-            'favicon' => 'nullable|file|mimes:png,ico|max:512',
+            'favicon' => 'nullable|file|max:512',
             'remove_logo_light' => 'sometimes|boolean',
             'remove_logo_dark' => 'sometimes|boolean',
             'remove_favicon' => 'sometimes|boolean',
-        ])->validate();
+        ]);
+
+        $validator->after(function ($validator) use ($files) {
+            if (isset($files['favicon']) && ! $this->isValidFavicon($files['favicon'])) {
+                $validator->errors()->add('favicon', 'El favicon debe ser un archivo PNG, ICO, JPG o WEBP valido.');
+            }
+        });
+
+        $validated = $validator->validate();
 
         $removeRequested = collect(['remove_logo_light', 'remove_logo_dark', 'remove_favicon'])
             ->contains(fn (string $key) => (bool) ($validated[$key] ?? false));
@@ -116,5 +124,28 @@ class PlatformBrandingService
         $path = $settings?->{$pathColumn};
 
         return $path ? Storage::disk($settings->assets_disk ?: 'public')->url($path) : null;
+    }
+
+    private function isValidFavicon(UploadedFile $file): bool
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        $mime = strtolower((string) $file->getMimeType());
+
+        if (in_array($extension, ['png', 'jpg', 'jpeg', 'webp'], true)) {
+            return in_array($mime, ['image/png', 'image/jpeg', 'image/webp'], true);
+        }
+
+        if ($extension !== 'ico') {
+            return false;
+        }
+
+        $handle = fopen($file->getRealPath(), 'rb');
+        $signature = $handle ? fread($handle, 4) : false;
+
+        if (is_resource($handle)) {
+            fclose($handle);
+        }
+
+        return $signature === "\x00\x00\x01\x00";
     }
 }

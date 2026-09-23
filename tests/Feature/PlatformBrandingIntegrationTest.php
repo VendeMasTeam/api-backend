@@ -30,7 +30,10 @@ class PlatformBrandingIntegrationTest extends TestCase
             'name' => 'Mi CRM',
             'logo_light' => $this->png('logo-light.png'),
             'logo_dark' => $this->png('logo-dark.png'),
-            'favicon' => $this->png('favicon.png'),
+            'favicon' => UploadedFile::fake()->createWithContent(
+                'favicon.ico',
+                "\x00\x00\x01\x00\x01\x00\x01\x01\x00\x00\x01\x00\x20\x00"
+            ),
         ]);
 
         $response

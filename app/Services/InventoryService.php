@@ -469,6 +469,7 @@ class InventoryService
 
         $warehouses = Warehouse::query()
             ->where('is_active', true)
+            ->when($warehouse, fn ($query) => $query->whereKey($warehouse->getKey()))
             ->orderBy('name')
             ->get(['id', 'uid', 'name', 'code', 'location'])
             ->map(fn (Warehouse $warehouse) => [

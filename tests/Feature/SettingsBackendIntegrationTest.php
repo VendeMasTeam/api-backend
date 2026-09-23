@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Account;
+use App\Models\Contact;
 use App\Models\Currency;
 use App\Models\CustomField;
 use App\Models\DocumentType;
@@ -48,6 +49,37 @@ class SettingsBackendIntegrationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.color', '#2563eb')
             ->assertJsonPath('data.entity_types.0', 'DEAL');
+    }
+
+    public function test_tag_assignment_accepts_official_entity_type_and_returns_tags_with_contact(): void
+    {
+        $user = $this->authenticateWithPermissions(['tags.manage', 'contacts.read']);
+        $contact = Contact::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'first_name' => 'Cliente',
+            'last_name' => 'Etiquetado',
+            'email' => 'tagged-contact@example.test',
+        ]);
+        $tag = Tag::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'VIP',
+            'key' => 'vip',
+            'color' => '#2563eb',
+            'entity_types' => ['CONTACT'],
+        ]);
+
+        $this->postJson('/api/tags/assign', [
+            'tag_uid' => $tag->uid,
+            'entity_type' => 'CONTACT',
+            'entity_uid' => $contact->uid,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.entity_type', 'CONTACT');
+
+        $this->getJson('/api/contacts/'.$contact->uid)
+            ->assertOk()
+            ->assertJsonPath('data.tags.0.uid', $tag->uid);
     }
 
     public function test_settings_endpoints_accept_search_query(): void
@@ -162,13 +194,13 @@ class SettingsBackendIntegrationTest extends TestCase
         User::query()->create([
             'tenant_id' => $user->tenant_id,
             'name' => 'Activo Operativo',
-            'email' => 'activo+' . uniqid() . '@example.test',
+            'email' => 'activo+'.uniqid().'@example.test',
             'password' => bcrypt('secret123'),
         ]);
         User::query()->create([
             'tenant_id' => $user->tenant_id,
             'name' => 'Bloqueado Operativo',
-            'email' => 'bloqueado+' . uniqid() . '@example.test',
+            'email' => 'bloqueado+'.uniqid().'@example.test',
             'password' => bcrypt('secret123'),
             'locked_until' => now()->addYear(),
         ]);

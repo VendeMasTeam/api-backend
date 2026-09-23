@@ -5,13 +5,14 @@ namespace App\Models;
 use App\Models\Traits\AppliesRowLevelSecurity;
 use App\Models\Traits\HasCustomFieldValues;
 use App\Models\Traits\HasPublicUid;
+use App\Models\Traits\HasTags;
 use App\Models\Traits\HasTenantRelation;
 use App\Models\Traits\TenantScope;
 use Illuminate\Database\Eloquent\Model;
 
 class Opportunity extends Model
 {
-    use AppliesRowLevelSecurity, HasCustomFieldValues, HasPublicUid, HasTenantRelation, TenantScope;
+    use AppliesRowLevelSecurity, HasCustomFieldValues, HasPublicUid, HasTags, HasTenantRelation, TenantScope;
 
     protected $fillable = [
         'uid',

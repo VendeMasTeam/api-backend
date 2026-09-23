@@ -358,11 +358,14 @@ class AutomationService
     {
         $entity = $this->resolveAutomationEntity($config, $payload);
 
-        if (! $entity || empty($config['field'])) {
+        $field = $config['field'] ?? $config['field_name'] ?? null;
+        $value = $config['value'] ?? $config['field_value'] ?? null;
+
+        if (! $entity || ! $field || ! in_array($field, $entity->getFillable(), true)) {
             return ['type' => 'update_field', 'success' => false];
         }
 
-        $entity->update([$config['field'] => $config['value'] ?? null]);
+        $entity->update([$field => $value]);
 
         return ['type' => 'update_field', 'success' => true];
     }
@@ -548,6 +551,14 @@ class AutomationService
 
         if (! empty($config['tag_name'])) {
             return Tag::query()->where('name', $config['tag_name'])->first();
+        }
+
+        if (! empty($config['tag'])) {
+            return Tag::query()
+                ->where('uid', $config['tag'])
+                ->orWhere('key', $config['tag'])
+                ->orWhere('name', $config['tag'])
+                ->first();
         }
 
         return null;

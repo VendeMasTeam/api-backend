@@ -19,7 +19,7 @@ services:
       - traefik-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`vende-mas.com.co`) && (PathPrefix(`/api`) || Path(`/login`) || Path(`/forgot-password`) || Path(`/reset-password`) || Path(`/logout`) || Path(`/me`) || PathPrefix(`/me/`) || Path(`/auth/init`) || PathPrefix(`/2fa`))"
+      - "traefik.http.routers.api.rule=Host(`vende-mas.com.co`) && (PathPrefix(`/api`) || PathPrefix(`/storage/`) || Path(`/login`) || Path(`/forgot-password`) || Path(`/reset-password`) || Path(`/logout`) || Path(`/me`) || PathPrefix(`/me/`) || Path(`/auth/init`) || PathPrefix(`/2fa`))"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.api.priority=110"

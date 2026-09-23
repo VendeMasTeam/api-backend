@@ -11,9 +11,7 @@ use Illuminate\Support\Facades\Validator;
 
 class SegmentService
 {
-    public function __construct(private readonly ConditionEvaluator $conditionEvaluator)
-    {
-    }
+    public function __construct(private readonly ConditionEvaluator $conditionEvaluator) {}
 
     public function list(array $filters = [])
     {
@@ -47,6 +45,7 @@ class SegmentService
     {
         $segment = $this->get($uid);
         $rows = $this->queryFor($segment->entity_type)
+            ->with('tags')
             ->get()
             ->filter(fn ($row) => $this->conditionEvaluator->matches($segment->rules ?? [], $row, $segment->logic))
             ->values();

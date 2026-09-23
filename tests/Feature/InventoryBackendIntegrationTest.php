@@ -362,6 +362,12 @@ class InventoryBackendIntegrationTest extends TestCase
             'code' => 'BCN01',
             'is_active' => true,
         ]);
+        Warehouse::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'Bodega Secundaria',
+            'code' => 'SEC02',
+            'is_active' => true,
+        ]);
 
         $product = InventoryProduct::query()->create([
             'tenant_id' => $user->tenant_id,
@@ -382,9 +388,11 @@ class InventoryBackendIntegrationTest extends TestCase
 
         $this->getJson('/api/inventory/stock/entry-options?warehouse_uid='.$warehouse->uid)
             ->assertOk()
+            ->assertJsonCount(1, 'data.warehouses')
             ->assertJsonPath('data.warehouses.0.uid', $warehouse->uid)
             ->assertJsonPath('data.products.0.uid', $product->uid)
             ->assertJsonPath('data.products.0.stocks.0.available_stock', 4)
+            ->assertJsonPath('data.summary.warehouses', 1)
             ->assertJsonPath('data.summary.products', 1);
     }
 

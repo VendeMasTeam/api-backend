@@ -69,6 +69,40 @@ class StructuralModulesIntegrationTest extends TestCase
             ->assertJsonPath('data.segment.execution_count', 1);
     }
 
+    public function test_segment_can_match_contacts_by_tag_uid(): void
+    {
+        $user = $this->authenticateWithPermissions(['segments.read', 'segments.manage']);
+        $tag = Tag::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'name' => 'VIP',
+            'key' => 'vip',
+            'color' => '#2563eb',
+            'entity_types' => ['CONTACT'],
+        ]);
+        $contact = Contact::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'owner_user_id' => $user->getKey(),
+            'first_name' => 'Cliente',
+            'last_name' => 'VIP',
+            'email' => 'vip-segment@example.test',
+        ]);
+        $contact->tags()->attach($tag->getKey());
+
+        $segment = $this->postJson('/api/segments', [
+            'name' => 'Contactos VIP',
+            'entity_type' => 'contact',
+            'rules' => [
+                ['field' => 'tags', 'operator' => 'contains', 'value' => $tag->uid],
+            ],
+        ])->assertCreated();
+
+        $this->postJson('/api/segments/'.$segment->json('data.uid').'/run')
+            ->assertOk()
+            ->assertJsonPath('data.count', 1)
+            ->assertJsonPath('data.data.0.uid', $contact->uid)
+            ->assertJsonPath('data.data.0.tags.0.uid', $tag->uid);
+    }
+
     public function test_teams_crud_manages_manager_and_members(): void
     {
         $owner = $this->authenticateWithPermissions(['teams.read', 'teams.manage']);
