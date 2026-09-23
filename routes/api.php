@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\ActivityController;
 use App\Http\Controllers\Api\AdminBillingController;
 use App\Http\Controllers\Api\AdminDashboardController;
+use App\Http\Controllers\Api\AdminPlatformRoleController;
+use App\Http\Controllers\Api\AdminPlatformUserController;
 use App\Http\Controllers\Api\AdminTelemetryController;
 use App\Http\Controllers\Api\AdminTenantController;
 use App\Http\Controllers\Api\AuthController;
@@ -41,8 +43,6 @@ use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\RelationController;
 use App\Http\Controllers\Api\ReportController;
-use App\Http\Controllers\Api\AdminPlatformRoleController;
-use App\Http\Controllers\Api\AdminPlatformUserController;
 use App\Http\Controllers\Api\ScheduleController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\SegmentController;
@@ -652,6 +652,7 @@ Route::middleware(['auth:sanctum', 'full.access', 'platform.admin'])->prefix('ad
     });
 
     Route::prefix('platform')->group(function () {
+        Route::get('/permissions', [AdminPlatformRoleController::class, 'permissions'])->middleware('platform.permission:admin.tenants.manage');
         Route::get('/roles', [AdminPlatformRoleController::class, 'index'])->middleware('platform.permission:admin.tenants.manage');
         Route::post('/roles', [AdminPlatformRoleController::class, 'store'])->middleware('platform.permission:admin.tenants.manage');
         Route::get('/roles/permissions', [AdminPlatformRoleController::class, 'permissions'])->middleware('platform.permission:admin.tenants.manage');

@@ -100,6 +100,9 @@ class PermissionSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
+            $permission['scope'] = str_starts_with($permission['key'], 'admin.') || $permission['key'] === 'plans.manage'
+                ? Permission::SCOPE_PLATFORM
+                : Permission::SCOPE_TENANT;
             $model = Permission::query()->firstOrNew(['key' => $permission['key']]);
             $model->fill($permission);
 

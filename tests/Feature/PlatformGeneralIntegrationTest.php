@@ -61,7 +61,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         ]);
         $user->roles()->attach($role->getKey());
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->getJson('/api/auth/init')
             ->assertOk()
@@ -98,6 +98,9 @@ class PlatformGeneralIntegrationTest extends TestCase
                     'module' => str_contains($key, '.') ? explode('.', $key)[0] : 'platform',
                     'action' => $key,
                     'description' => $key,
+                    'scope' => str_starts_with($key, 'admin.')
+                        ? Permission::SCOPE_PLATFORM
+                        : Permission::SCOPE_TENANT,
                 ]
             );
         }
@@ -123,7 +126,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             ->assertJsonPath('data.modules.10.permissions', []);
 
         $this->assertSame([], $response->json('data.permissions.effective'));
-        $this->assertContains('users.manage', $response->json('data.admin_permissions'));
+        $this->assertNotContains('users.manage', $response->json('data.admin_permissions'));
         $this->assertContains('admin.dashboard.read', $response->json('data.admin_permissions'));
     }
 
@@ -139,7 +142,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             'products.manage',
         ]);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $response = $this->getJson('/api/auth/init')->assertOk();
         $sales = collect($response->json('data.modules'))->firstWhere('key', 'sales');
@@ -177,7 +180,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         ]);
         $user = $this->tenantUser($tenant, ['inventory.read', 'opportunities.read']);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $response = $this->getJson('/api/auth/init')->assertOk();
         $modules = collect($response->json('data.modules'));
@@ -223,7 +226,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         ]);
         $user = $this->tenantUser($tenant, ['inventory.read', 'opportunities.read', 'settings.manage']);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $response = $this->getJson('/api/auth/init')->assertOk();
         $modules = collect($response->json('data.modules'));
@@ -256,7 +259,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         ]);
         $user = $this->tenantUser($tenant, []);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->getJson('/api/me/features')
             ->assertOk()
@@ -283,7 +286,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         ]);
         $user = $this->tenantUser($tenant, []);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->getJson('/api/me/features')
             ->assertOk()
@@ -322,7 +325,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             'custom-fields.manage',
         ]);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         foreach ([
             '/api/inventory/master',
@@ -366,7 +369,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             'custom-fields.manage',
         ]);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $response = $this->getJson('/api/auth/init')->assertOk();
         $modules = collect($response->json('data.modules'));
@@ -415,7 +418,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             'custom-fields.manage',
         ]);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         foreach ([
             '/api/inventory/master',
@@ -442,7 +445,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         ]);
         $tenant->forceFill(['timezone' => 'America/Bogota', 'date_format' => 'd/m/Y'])->save();
         $user = $this->tenantUser($tenant, ['settings.manage']);
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->getJson('/api/settings/localization')
             ->assertOk()
@@ -461,7 +464,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             'is_active' => true,
         ]);
         $user = $this->tenantUser($tenant, []);
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         Account::query()->create([
             'tenant_id' => $tenant->getKey(),
@@ -580,7 +583,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         $role->permissions()->sync([$inventoryPermission->getKey(), $salesPermission->getKey()]);
 
         $user = $this->tenantUser($tenant, ['users.manage']);
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->getJson('/api/rbac/roles?only_active_modules=true')
             ->assertOk()
@@ -604,7 +607,7 @@ class PlatformGeneralIntegrationTest extends TestCase
         $user = User::query()->create([
             'tenant_id' => $tenant->getKey(),
             'name' => 'Platform Owner',
-            'email' => 'platform-owner+' . uniqid() . '@example.test',
+            'email' => 'platform-owner+'.uniqid().'@example.test',
             'password' => bcrypt('secret123'),
         ]);
 

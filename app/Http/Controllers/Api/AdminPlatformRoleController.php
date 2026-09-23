@@ -9,6 +9,7 @@ use App\Support\ApiIndex;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AdminPlatformRoleController extends Controller
@@ -18,11 +19,11 @@ class AdminPlatformRoleController extends Controller
         $query = AdminRole::query()->withCount('users');
 
         $search = $request->get('search');
-        if (!empty($search)) {
+        if (! empty($search)) {
             $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', '%' . $search . '%')
-                  ->orWhere('key', 'like', '%' . $search . '%')
-                  ->orWhere('description', 'like', '%' . $search . '%');
+                $q->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('key', 'like', '%'.$search.'%')
+                    ->orWhere('description', 'like', '%'.$search.'%');
             });
         }
 
@@ -45,7 +46,10 @@ class AdminPlatformRoleController extends Controller
             'key' => 'nullable|string|max:100',
             'description' => 'nullable|string',
             'permission_uids' => 'nullable|array',
-            'permission_uids.*' => 'uuid|exists:permissions,uid',
+            'permission_uids.*' => [
+                'uuid',
+                Rule::exists('permissions', 'uid')->where('scope', Permission::SCOPE_PLATFORM),
+            ],
         ])->validate();
 
         $role = AdminRole::query()->create([
@@ -54,8 +58,8 @@ class AdminPlatformRoleController extends Controller
             'description' => $validated['description'] ?? null,
         ]);
 
-        if (!empty($validated['permission_uids'])) {
-            $permissionIds = Permission::query()->whereIn('uid', $validated['permission_uids'])->pluck('id');
+        if (! empty($validated['permission_uids'])) {
+            $permissionIds = $this->platformPermissionIds($validated['permission_uids']);
             $role->permissions()->sync($permissionIds);
         }
 
@@ -75,7 +79,10 @@ class AdminPlatformRoleController extends Controller
             'key' => 'nullable|string|max:100',
             'description' => 'nullable|string',
             'permission_uids' => 'nullable|array',
-            'permission_uids.*' => 'uuid|exists:permissions,uid',
+            'permission_uids.*' => [
+                'uuid',
+                Rule::exists('permissions', 'uid')->where('scope', Permission::SCOPE_PLATFORM),
+            ],
         ])->validate();
 
         if (array_key_exists('key', $validated) && $validated['key'] !== null) {
@@ -91,7 +98,7 @@ class AdminPlatformRoleController extends Controller
         ]);
 
         if (array_key_exists('permission_uids', $validated)) {
-            $permissionIds = Permission::query()->whereIn('uid', $validated['permission_uids'])->pluck('id');
+            $permissionIds = $this->platformPermissionIds($validated['permission_uids']);
             $role->permissions()->sync($permissionIds);
         }
 
@@ -113,7 +120,29 @@ class AdminPlatformRoleController extends Controller
 
     public function permissions()
     {
-        return $this->successResponse(Permission::query()->orderBy('module')->orderBy('action')->get());
+        return $this->successResponse(
+            Permission::query()
+                ->where('scope', Permission::SCOPE_PLATFORM)
+                ->orderBy('module')
+                ->orderBy('action')
+                ->get()
+        );
+    }
+
+    private function platformPermissionIds(array $permissionUids)
+    {
+        $permissions = Permission::query()
+            ->where('scope', Permission::SCOPE_PLATFORM)
+            ->whereIn('uid', array_unique($permissionUids))
+            ->get();
+
+        if ($permissions->count() !== count(array_unique($permissionUids))) {
+            throw ValidationException::withMessages([
+                'permission_uids' => ['Todos los permisos deben pertenecer al alcance de plataforma'],
+            ]);
+        }
+
+        return $permissions->pluck('id');
     }
 
     private function uniqueRoleKey(string $source, ?int $ignoreRoleId = null): string
@@ -128,7 +157,7 @@ class AdminPlatformRoleController extends Controller
                 ->when($ignoreRoleId, fn ($query) => $query->whereKeyNot($ignoreRoleId))
                 ->exists()
         ) {
-            $key = Str::limit($base, 95 - strlen((string) $suffix), '') . '_' . $suffix;
+            $key = Str::limit($base, 95 - strlen((string) $suffix), '').'_'.$suffix;
             $suffix++;
         }
 

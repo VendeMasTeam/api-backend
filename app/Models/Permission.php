@@ -9,12 +9,17 @@ class Permission extends Model
 {
     use HasPublicUid;
 
+    public const SCOPE_PLATFORM = 'platform';
+
+    public const SCOPE_TENANT = 'tenant';
+
     protected $fillable = [
         'uid',
         'key',
         'module',
         'action',
         'description',
+        'scope',
     ];
 
     protected $hidden = [

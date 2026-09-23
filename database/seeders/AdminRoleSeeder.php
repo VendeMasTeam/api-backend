@@ -27,7 +27,9 @@ class AdminRoleSeeder extends Seeder
             $superAdminRole->save();
         }
 
-        $superAdminRole->permissions()->sync(Permission::all()->pluck('id'));
+        $superAdminRole->permissions()->sync(
+            Permission::query()->where('scope', Permission::SCOPE_PLATFORM)->pluck('id')
+        );
 
         $supportRole = AdminRole::query()->firstOrCreate(
             ['key' => 'support'],

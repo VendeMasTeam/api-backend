@@ -40,8 +40,11 @@ trait HasAdminAccessControl
 
     public function effectiveAdminPermissions()
     {
-        $directPermissions = $this->permissions()->get();
+        $directPermissions = $this->permissions()
+            ->where('scope', Permission::SCOPE_PLATFORM)
+            ->get();
         $rolePermissions = Permission::query()
+            ->where('scope', Permission::SCOPE_PLATFORM)
             ->whereHas('adminRoles.users', fn ($q) => $q->where('users.id', $this->getKey()))
             ->get();
 

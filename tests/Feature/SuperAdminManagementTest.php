@@ -11,8 +11,10 @@ use App\Models\Role;
 use App\Models\SystemLog;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\TenantRoleProvisioner;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -89,6 +91,44 @@ class SuperAdminManagementTest extends TestCase
             ->assertJsonPath('data.key', 'soporte_plataforma_2');
     }
 
+    public function test_platform_roles_only_list_and_accept_platform_permissions(): void
+    {
+        $this->authenticateSuperadmin(['admin.tenants.manage']);
+
+        $platformPermission = Permission::query()->create([
+            'key' => 'admin.support.manage',
+            'module' => 'admin',
+            'action' => 'support.manage',
+            'description' => 'Administrar soporte de plataforma',
+            'scope' => Permission::SCOPE_PLATFORM,
+        ]);
+        $tenantPermission = Permission::query()->create([
+            'key' => 'contacts.test-read',
+            'module' => 'contacts',
+            'action' => 'read',
+            'description' => 'Permiso operativo de prueba',
+            'scope' => Permission::SCOPE_TENANT,
+        ]);
+
+        $this->getJson('/api/admin/platform/permissions')
+            ->assertOk()
+            ->assertJsonFragment(['uid' => $platformPermission->uid, 'scope' => 'platform'])
+            ->assertJsonMissing(['uid' => $tenantPermission->uid]);
+
+        $this->postJson('/api/admin/platform/roles', [
+            'name' => 'Soporte Restringido',
+            'permission_uids' => [$tenantPermission->uid],
+        ])->assertUnprocessable();
+
+        $this->postJson('/api/admin/platform/roles', [
+            'name' => 'Soporte Configurable',
+            'permission_uids' => [$platformPermission->uid],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.permissions.0.uid', $platformPermission->uid)
+            ->assertJsonPath('data.permissions.0.scope', 'platform');
+    }
+
     public function test_superadmin_can_lock_and_unlock_platform_user(): void
     {
         $this->authenticateSuperadmin(['admin.tenants.purge']);
@@ -102,7 +142,7 @@ class SuperAdminManagementTest extends TestCase
         ]);
         $token = $target->createToken('api-token')->accessToken;
 
-        $this->postJson('/api/admin/platform/users/' . $target->uid . '/lock')
+        $this->postJson('/api/admin/platform/users/'.$target->uid.'/lock')
             ->assertOk()
             ->assertJsonPath('message', 'Usuario de plataforma desactivado')
             ->assertJsonPath('data.status', 'INACTIVO');
@@ -110,7 +150,7 @@ class SuperAdminManagementTest extends TestCase
         $this->assertNotNull($target->fresh()->locked_until);
         $this->assertDatabaseMissing('personal_access_tokens', ['id' => $token->getKey()]);
 
-        $this->postJson('/api/admin/platform/users/' . $target->uid . '/unlock')
+        $this->postJson('/api/admin/platform/users/'.$target->uid.'/unlock')
             ->assertOk()
             ->assertJsonPath('message', 'Usuario de plataforma activado')
             ->assertJsonPath('data.status', 'ACTIVO');
@@ -131,7 +171,7 @@ class SuperAdminManagementTest extends TestCase
         ]);
         $token = $target->createToken('api-token')->accessToken;
 
-        $this->deleteJson('/api/admin/platform/users/' . $target->uid . '/purge', [
+        $this->deleteJson('/api/admin/platform/users/'.$target->uid.'/purge', [
             'confirmation' => $target->email,
         ])
             ->assertOk()
@@ -155,7 +195,7 @@ class SuperAdminManagementTest extends TestCase
             'is_platform_admin' => true,
         ]);
 
-        $this->deleteJson('/api/admin/platform/users/' . $target->uid . '/purge', [
+        $this->deleteJson('/api/admin/platform/users/'.$target->uid.'/purge', [
             'confirmation' => 'wrong@example.test',
         ])
             ->assertUnprocessable()
@@ -168,11 +208,11 @@ class SuperAdminManagementTest extends TestCase
     {
         $admin = $this->authenticateSuperadmin(['admin.tenants.purge']);
 
-        $this->postJson('/api/admin/platform/users/' . $admin->uid . '/lock')
+        $this->postJson('/api/admin/platform/users/'.$admin->uid.'/lock')
             ->assertUnprocessable()
             ->assertJsonPath('errors.user.0', 'No puedes desactivar tu propio usuario de plataforma');
 
-        $this->deleteJson('/api/admin/platform/users/' . $admin->uid . '/purge', [
+        $this->deleteJson('/api/admin/platform/users/'.$admin->uid.'/purge', [
             'confirmation' => $admin->email,
         ])
             ->assertUnprocessable()
@@ -199,7 +239,7 @@ class SuperAdminManagementTest extends TestCase
             'is_active' => true,
         ]);
 
-        $this->deleteJson('/api/plans/' . $plan->uid)
+        $this->deleteJson('/api/plans/'.$plan->uid)
             ->assertOk()
             ->assertJsonPath('data.status', 'INACTIVO');
 
@@ -301,7 +341,7 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.manage']);
 
         $tenant = $this->tenantWithPlan();
-        $role = \App\Models\Role::withoutGlobalScopes()->create([
+        $role = Role::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
             'name' => 'Owner',
             'key' => 'owner',
@@ -316,13 +356,13 @@ class SuperAdminManagementTest extends TestCase
         ]);
         $user->roles()->attach($role->getKey());
 
-        $this->getJson('/api/admin/tenants/' . $tenant->uid . '/users')
+        $this->getJson('/api/admin/tenants/'.$tenant->uid.'/users')
             ->assertOk()
             ->assertJsonPath('data.0.uid', $user->uid)
             ->assertJsonPath('data.0.name', 'Juan Perez')
             ->assertJsonPath('data.0.email', 'juan@acme.com')
             ->assertJsonPath('data.0.rol', 'owner')
-            ->assertJsonPath('data.0.ultimo_acceso', \Illuminate\Support\Carbon::parse('2025-03-20 08:00:00')->toISOString())
+            ->assertJsonPath('data.0.ultimo_acceso', Carbon::parse('2025-03-20 08:00:00')->toISOString())
             ->assertJsonPath('data.0.estado', 'Activo')
             ->assertJsonPath('meta.pagination.current_page', 1)
             ->assertJsonPath('meta.pagination.per_page', 25)
@@ -334,13 +374,13 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.manage']);
 
         $tenant = $this->tenantWithPlan();
-        $ownerRole = \App\Models\Role::withoutGlobalScopes()->create([
+        $ownerRole = Role::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
             'name' => 'Owner',
             'key' => 'owner',
             'is_system' => true,
         ]);
-        $managerRole = \App\Models\Role::withoutGlobalScopes()->create([
+        $managerRole = Role::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
             'name' => 'Manager',
             'key' => 'manager',
@@ -363,16 +403,16 @@ class SuperAdminManagementTest extends TestCase
         ]);
         $manager->roles()->attach($managerRole->getKey());
 
-        $this->getJson('/api/admin/tenants/' . $tenant->uid . '/users?role=owner')
+        $this->getJson('/api/admin/tenants/'.$tenant->uid.'/users?role=owner')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.uid', $owner->uid);
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $owner->uid . '/lock')
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$owner->uid.'/lock')
             ->assertOk()
             ->assertJsonPath('data.estado', 'Inactivo');
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $owner->uid . '/unlock')
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$owner->uid.'/unlock')
             ->assertOk()
             ->assertJsonPath('data.estado', 'Activo');
     }
@@ -383,7 +423,7 @@ class SuperAdminManagementTest extends TestCase
 
         $this->permission('dashboard.read', 'dashboard');
         $tenant = $this->tenantWithPlan();
-        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+        app(TenantRoleProvisioner::class)->provision($tenant);
 
         $user = User::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
@@ -397,7 +437,7 @@ class SuperAdminManagementTest extends TestCase
             ->firstOrFail();
         $user->roles()->attach($seller->getKey());
 
-        $this->putJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $user->uid, [
+        $this->putJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$user->uid, [
             'name' => 'New Name',
             'email' => 'new-user@acme.com',
             'role' => 'manager',
@@ -417,7 +457,7 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.manage']);
 
         $tenant = $this->tenantWithPlan();
-        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+        app(TenantRoleProvisioner::class)->provision($tenant);
 
         $owner = User::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
@@ -439,7 +479,7 @@ class SuperAdminManagementTest extends TestCase
 
         $token = $seller->createToken('api-token')->accessToken;
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $seller->uid)
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$seller->uid)
             ->assertOk()
             ->assertJsonPath('data.estado', 'Inactivo');
 
@@ -454,7 +494,7 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.manage']);
 
         $tenant = $this->tenantWithPlan();
-        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+        app(TenantRoleProvisioner::class)->provision($tenant);
 
         $owner = User::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
@@ -465,7 +505,7 @@ class SuperAdminManagementTest extends TestCase
         $ownerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'owner')->firstOrFail();
         $owner->roles()->attach($ownerRole->getKey());
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $owner->uid)
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$owner->uid)
             ->assertUnprocessable()
             ->assertJsonPath('errors.user.0', 'No puedes eliminar el ultimo owner activo del tenant');
 
@@ -490,7 +530,7 @@ class SuperAdminManagementTest extends TestCase
         ]);
         $token = $user->createToken('api-token')->accessToken;
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid)
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid)
             ->assertOk()
             ->assertJsonPath('data.estado', 'ARCHIVADO')
             ->assertJsonPath('data.schema_name', 'tenant_acme_corporation');
@@ -509,7 +549,7 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.purge']);
 
         $tenant = $this->tenantWithPlan();
-        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+        app(TenantRoleProvisioner::class)->provision($tenant);
 
         $user = User::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
@@ -526,7 +566,7 @@ class SuperAdminManagementTest extends TestCase
         $user->roles()->attach($role->getKey());
         $token = $user->createToken('api-token')->accessToken;
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/purge', [
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid.'/purge', [
             'confirmation' => $tenant->name,
         ])
             ->assertOk()
@@ -546,7 +586,7 @@ class SuperAdminManagementTest extends TestCase
 
         $tenant = $this->tenantWithPlan();
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/purge', [
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid.'/purge', [
             'confirmation' => 'Acme',
         ])
             ->assertUnprocessable()
@@ -560,7 +600,7 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.purge']);
 
         $tenant = $this->tenantWithPlan();
-        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+        app(TenantRoleProvisioner::class)->provision($tenant);
 
         $owner = User::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
@@ -582,7 +622,7 @@ class SuperAdminManagementTest extends TestCase
 
         $token = $seller->createToken('api-token')->accessToken;
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $seller->uid . '/purge', [
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$seller->uid.'/purge', [
             'confirmation' => $seller->email,
         ])
             ->assertOk()
@@ -600,7 +640,7 @@ class SuperAdminManagementTest extends TestCase
         $this->authenticateSuperadmin(['admin.tenants.purge']);
 
         $tenant = $this->tenantWithPlan();
-        app(\App\Services\TenantRoleProvisioner::class)->provision($tenant);
+        app(TenantRoleProvisioner::class)->provision($tenant);
 
         $owner = User::withoutGlobalScopes()->create([
             'tenant_id' => $tenant->getKey(),
@@ -612,7 +652,7 @@ class SuperAdminManagementTest extends TestCase
         $ownerRole = Role::withoutGlobalScopes()->where('tenant_id', $tenant->getKey())->where('key', 'owner')->firstOrFail();
         $owner->roles()->attach($ownerRole->getKey());
 
-        $this->deleteJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $owner->uid . '/purge', [
+        $this->deleteJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$owner->uid.'/purge', [
             'confirmation' => $owner->email,
         ])
             ->assertUnprocessable()
@@ -631,16 +671,16 @@ class SuperAdminManagementTest extends TestCase
             'expires_at' => now()->addDays(14),
         ]);
 
-        $this->getJson('/api/admin/tenants/' . $tenant->uid)
+        $this->getJson('/api/admin/tenants/'.$tenant->uid)
             ->assertOk()
             ->assertJsonPath('data.estado', 'TRIAL')
             ->assertJsonStructure(['data' => ['expires_at']]);
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/archive')
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/archive')
             ->assertOk()
             ->assertJsonPath('data.estado', 'ARCHIVADO');
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/restore')
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/restore')
             ->assertOk()
             ->assertJsonPath('data.estado', 'ACTIVO');
     }
@@ -668,7 +708,7 @@ class SuperAdminManagementTest extends TestCase
                 'tenant_id' => $invoiceTenant->getKey(),
                 'invoiceable_type' => Tenant::class,
                 'invoiceable_id' => $invoiceTenant->getKey(),
-                'invoice_number' => 'INV-FILTER-' . $index,
+                'invoice_number' => 'INV-FILTER-'.$index,
                 'status' => 'issued',
                 'currency' => 'USD',
                 'subtotal' => 100,
@@ -679,7 +719,7 @@ class SuperAdminManagementTest extends TestCase
             ]);
         }
 
-        $this->getJson('/api/admin/billing?search=Acme&plan_uid=' . $tenant->plan->uid)
+        $this->getJson('/api/admin/billing?search=Acme&plan_uid='.$tenant->plan->uid)
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.tenant_uid', $tenant->uid);
@@ -696,7 +736,7 @@ class SuperAdminManagementTest extends TestCase
             'is_active' => true,
         ]);
 
-        $this->deleteJson('/api/admin/telemetry/alerts/' . $alert->uid)
+        $this->deleteJson('/api/admin/telemetry/alerts/'.$alert->uid)
             ->assertOk();
 
         $this->assertDatabaseMissing('admin_alert_rules', [
@@ -725,7 +765,7 @@ class SuperAdminManagementTest extends TestCase
             ],
         ]);
 
-        $response = $this->getJson('/api/admin/tenants/' . $tenant->uid . '/permissions?only_active_modules=true')
+        $response = $this->getJson('/api/admin/tenants/'.$tenant->uid.'/permissions?only_active_modules=true')
             ->assertOk();
 
         $keys = collect($response->json('data'))->pluck('key');
@@ -754,12 +794,12 @@ class SuperAdminManagementTest extends TestCase
             User::withoutGlobalScopes()->create([
                 'tenant_id' => $tenant->getKey(),
                 'name' => $name,
-                'email' => 'tenant-user-' . $index . '@acme.com',
+                'email' => 'tenant-user-'.$index.'@acme.com',
                 'password' => bcrypt('secret123'),
             ]);
         }
 
-        $this->getJson('/api/admin/tenants/' . $tenant->uid . '/users?page=2&per_page=2')
+        $this->getJson('/api/admin/tenants/'.$tenant->uid.'/users?page=2&per_page=2')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.name', 'Maria Ruiz')
@@ -775,14 +815,15 @@ class SuperAdminManagementTest extends TestCase
 
         $tenant = $this->tenantWithPlan();
 
-        app()->instance('auth.password', new class {
+        app()->instance('auth.password', new class
+        {
             public function sendResetLink(array $credentials, ?\Closure $callback = null): void
             {
                 throw new \RuntimeException('mail transport unavailable');
             }
         });
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/users', [
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/users', [
             'name' => 'Nuevo Admin',
             'email' => 'nuevo-admin@acme.com',
             'role' => 'owner',
@@ -807,7 +848,7 @@ class SuperAdminManagementTest extends TestCase
 
         $tenant = $this->tenantWithPlan();
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/users', [
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/users', [
             'name' => 'Nuevo Owner',
             'email' => 'nuevo-owner@acme.com',
             'role' => 'owner',
@@ -945,7 +986,7 @@ class SuperAdminManagementTest extends TestCase
             ->where('tenant_id', $tenant->getKey())
             ->delete();
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/users', [
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/users', [
             'name' => 'Admin TT',
             'email' => 'ttadmin2026@yopmail.com',
             'role' => 'owner',
@@ -983,7 +1024,7 @@ class SuperAdminManagementTest extends TestCase
             'password' => bcrypt('secret123'),
         ]);
 
-        $this->getJson('/api/users/' . $user->uid . '/access')
+        $this->getJson('/api/users/'.$user->uid.'/access')
             ->assertOk()
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.user.uid', $user->uid);
