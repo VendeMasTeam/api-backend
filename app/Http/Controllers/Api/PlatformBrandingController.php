@@ -20,7 +20,11 @@ class PlatformBrandingController extends Controller
     {
         try {
             return $this->successResponse(
-                $this->service->update($request->all(), $request->file('logo')),
+                $this->service->update($request->all(), [
+                    'logo_light' => $request->file('logo_light'),
+                    'logo_dark' => $request->file('logo_dark'),
+                    'favicon' => $request->file('favicon'),
+                ]),
                 200,
                 'Branding de plataforma actualizado'
             );

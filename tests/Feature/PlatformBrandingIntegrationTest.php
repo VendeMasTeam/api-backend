@@ -22,42 +22,69 @@ class PlatformBrandingIntegrationTest extends TestCase
         $this->getJson('/api/platform/branding')
             ->assertOk()
             ->assertJsonPath('data.name', config('app.name'))
-            ->assertJsonPath('data.logo_url', null);
+            ->assertJsonPath('data.logo_light_url', null)
+            ->assertJsonPath('data.logo_dark_url', null)
+            ->assertJsonPath('data.favicon_url', null);
 
         $response = $this->post('/api/admin/branding', [
             'name' => 'Mi CRM',
-            'logo' => UploadedFile::fake()->createWithContent(
-                'logo.png',
-                base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
-            ),
+            'logo_light' => $this->png('logo-light.png'),
+            'logo_dark' => $this->png('logo-dark.png'),
+            'favicon' => $this->png('favicon.png'),
         ]);
 
         $response
             ->assertOk()
             ->assertJsonPath('data.name', 'Mi CRM');
 
-        $logoUrl = $response->json('data.logo_url');
-        $this->assertNotNull($logoUrl);
-        $logoPath = str($logoUrl)->after('/storage/')->toString();
-        Storage::disk('public')->assertExists($logoPath);
+        $logoLightUrl = $response->json('data.logo_light_url');
+        $logoDarkUrl = $response->json('data.logo_dark_url');
+        $faviconUrl = $response->json('data.favicon_url');
+        $this->assertNotNull($logoLightUrl);
+        $this->assertNotNull($logoDarkUrl);
+        $this->assertNotNull($faviconUrl);
+
+        foreach ([$logoLightUrl, $logoDarkUrl, $faviconUrl] as $url) {
+            Storage::disk('public')->assertExists(str($url)->after('/storage/')->toString());
+        }
 
         $this->getJson('/api/platform/branding')
             ->assertOk()
             ->assertJsonPath('data.name', 'Mi CRM')
-            ->assertJsonPath('data.logo_url', $logoUrl);
+            ->assertJsonPath('data.logo_light_url', $logoLightUrl)
+            ->assertJsonPath('data.logo_dark_url', $logoDarkUrl)
+            ->assertJsonPath('data.favicon_url', $faviconUrl);
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
         $this->getJson('/api/auth/init')
             ->assertOk()
             ->assertJsonPath('data.branding.name', 'Mi CRM')
-            ->assertJsonPath('data.branding.logo_url', $logoUrl);
+            ->assertJsonPath('data.branding.logo_light_url', $logoLightUrl)
+            ->assertJsonPath('data.branding.logo_dark_url', $logoDarkUrl)
+            ->assertJsonPath('data.branding.favicon_url', $faviconUrl);
 
-        $this->postJson('/api/admin/branding', ['remove_logo' => true])
+        $this->postJson('/api/admin/branding', [
+            'remove_logo_light' => true,
+            'remove_logo_dark' => true,
+            'remove_favicon' => true,
+        ])
             ->assertOk()
             ->assertJsonPath('data.name', 'Mi CRM')
-            ->assertJsonPath('data.logo_url', null);
+            ->assertJsonPath('data.logo_light_url', null)
+            ->assertJsonPath('data.logo_dark_url', null)
+            ->assertJsonPath('data.favicon_url', null);
 
-        Storage::disk('public')->assertMissing($logoPath);
+        foreach ([$logoLightUrl, $logoDarkUrl, $faviconUrl] as $url) {
+            Storage::disk('public')->assertMissing(str($url)->after('/storage/')->toString());
+        }
+    }
+
+    private function png(string $name): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent(
+            $name,
+            base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
+        );
     }
 
     private function authenticatePlatformAdmin(): User

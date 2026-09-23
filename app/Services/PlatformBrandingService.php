@@ -19,17 +19,25 @@ class PlatformBrandingService
         return $this->serialize($settings);
     }
 
-    public function update(array $data, ?UploadedFile $logo = null): array
+    public function update(array $data, array $files = []): array
     {
-        $validated = Validator::make(array_merge($data, ['logo' => $logo]), [
+        $files = collect($files)->filter(fn ($file) => $file instanceof UploadedFile)->all();
+        $validated = Validator::make(array_merge($data, $files), [
             'name' => 'sometimes|string|min:1|max:120',
-            'logo' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
-            'remove_logo' => 'sometimes|boolean',
+            'logo_light' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
+            'logo_dark' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
+            'favicon' => 'nullable|file|mimes:png,ico|max:512',
+            'remove_logo_light' => 'sometimes|boolean',
+            'remove_logo_dark' => 'sometimes|boolean',
+            'remove_favicon' => 'sometimes|boolean',
         ])->validate();
 
-        if (! array_key_exists('name', $validated) && ! $logo && ! ($validated['remove_logo'] ?? false)) {
+        $removeRequested = collect(['remove_logo_light', 'remove_logo_dark', 'remove_favicon'])
+            ->contains(fn (string $key) => (bool) ($validated[$key] ?? false));
+
+        if (! array_key_exists('name', $validated) && $files === [] && ! $removeRequested) {
             throw ValidationException::withMessages([
-                'branding' => ['Debes enviar name, logo o remove_logo'],
+                'branding' => ['Debes enviar name, alguno de los logos, favicon o una opcion de eliminacion'],
             ]);
         }
 
@@ -43,33 +51,50 @@ class PlatformBrandingService
             ['key' => self::SETTINGS_KEY],
             ['brand_name' => config('app.name', 'Vende Mas')]
         );
-        $oldDisk = $settings->logo_disk;
-        $oldPath = $settings->logo_path;
+        $disk = $settings->assets_disk ?: 'public';
         $payload = [];
+        $pathsToDelete = [];
 
         if (array_key_exists('name', $validated)) {
             $payload['brand_name'] = trim($validated['name']);
         }
 
-        if ($logo) {
-            $logoPath = $logo->store('platform/branding', 'public');
+        $assets = [
+            'logo_light' => ['path' => 'logo_light_path', 'remove' => 'remove_logo_light'],
+            'logo_dark' => ['path' => 'logo_dark_path', 'remove' => 'remove_logo_dark'],
+            'favicon' => ['path' => 'favicon_path', 'remove' => 'remove_favicon'],
+        ];
 
-            if (! $logoPath) {
-                throw ValidationException::withMessages([
-                    'logo' => ['No fue posible almacenar el logo'],
-                ]);
+        foreach ($assets as $input => $asset) {
+            $oldPath = $settings->{$asset['path']};
+
+            if (isset($files[$input])) {
+                $newPath = $files[$input]->store('platform/branding', 'public');
+
+                if (! $newPath) {
+                    throw ValidationException::withMessages([
+                        $input => ['No fue posible almacenar el archivo'],
+                    ]);
+                }
+
+                $payload['assets_disk'] = 'public';
+                $payload[$asset['path']] = $newPath;
+
+                if ($oldPath) {
+                    $pathsToDelete[] = [$disk, $oldPath];
+                }
+            } elseif ($validated[$asset['remove']] ?? false) {
+                $payload[$asset['path']] = null;
+
+                if ($oldPath) {
+                    $pathsToDelete[] = [$disk, $oldPath];
+                }
             }
-
-            $payload['logo_disk'] = 'public';
-            $payload['logo_path'] = $logoPath;
-        } elseif ($validated['remove_logo'] ?? false) {
-            $payload['logo_disk'] = null;
-            $payload['logo_path'] = null;
         }
 
         $settings->update($payload);
 
-        if (($logo || ($validated['remove_logo'] ?? false)) && $oldDisk && $oldPath) {
+        foreach ($pathsToDelete as [$oldDisk, $oldPath]) {
             Storage::disk($oldDisk)->delete($oldPath);
         }
 
@@ -80,9 +105,16 @@ class PlatformBrandingService
     {
         return [
             'name' => $settings?->brand_name ?: config('app.name', 'Vende Mas'),
-            'logo_url' => $settings?->logo_disk && $settings?->logo_path
-                ? Storage::disk($settings->logo_disk)->url($settings->logo_path)
-                : null,
+            'logo_light_url' => $this->assetUrl($settings, 'logo_light_path'),
+            'logo_dark_url' => $this->assetUrl($settings, 'logo_dark_path'),
+            'favicon_url' => $this->assetUrl($settings, 'favicon_path'),
         ];
+    }
+
+    private function assetUrl(?PlatformSetting $settings, string $pathColumn): ?string
+    {
+        $path = $settings?->{$pathColumn};
+
+        return $path ? Storage::disk($settings->assets_disk ?: 'public')->url($path) : null;
     }
 }

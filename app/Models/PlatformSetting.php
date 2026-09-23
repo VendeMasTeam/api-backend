@@ -9,7 +9,9 @@ class PlatformSetting extends Model
     protected $fillable = [
         'key',
         'brand_name',
-        'logo_disk',
-        'logo_path',
+        'assets_disk',
+        'logo_light_path',
+        'logo_dark_path',
+        'favicon_path',
     ];
 }

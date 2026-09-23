@@ -12,8 +12,10 @@ return new class extends Migration
             $table->id();
             $table->string('key')->unique();
             $table->string('brand_name');
-            $table->string('logo_disk')->nullable();
-            $table->string('logo_path')->nullable();
+            $table->string('assets_disk')->nullable();
+            $table->string('logo_light_path')->nullable();
+            $table->string('logo_dark_path')->nullable();
+            $table->string('favicon_path')->nullable();
             $table->timestamps();
         });
     }
