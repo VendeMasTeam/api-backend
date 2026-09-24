@@ -14,9 +14,7 @@ use Illuminate\Validation\ValidationException;
 
 class AccessControlService
 {
-    public function __construct(private readonly PlanPermissionService $planPermissionService)
-    {
-    }
+    public function __construct(private readonly PlanPermissionService $planPermissionService) {}
 
     public function getRoles(array $filters = [])
     {
@@ -30,8 +28,8 @@ class AccessControlService
                 ->with('permissions')
                 ->withCount('users')
                 ->withCount('users as total_usuarios')
-                ->when(!empty($validated['search']), function ($query) use ($validated) {
-                    $search = '%' . mb_strtolower($validated['search']) . '%';
+                ->when(! empty($validated['search']), function ($query) use ($validated) {
+                    $search = '%'.mb_strtolower($validated['search']).'%';
 
                     $query->whereRaw('LOWER(name) LIKE ?', [$search]);
                 })
@@ -63,6 +61,7 @@ class AccessControlService
     public function getPermissions()
     {
         return Permission::query()
+            ->where('scope', Permission::SCOPE_TENANT)
             ->orderBy('module')
             ->orderBy('action')
             ->get();
@@ -195,7 +194,7 @@ class AccessControlService
 
         $user = $query->where('uid', $userUid)->first();
 
-        if (!$user) {
+        if (! $user) {
             throw new ModelNotFoundException('Usuario no encontrado');
         }
 
@@ -210,7 +209,7 @@ class AccessControlService
 
         $role = $query->where('uid', $roleUid)->first();
 
-        if (!$role) {
+        if (! $role) {
             throw ValidationException::withMessages([
                 'role_uid' => ['El rol no existe o no pertenece a este tenant'],
             ]);
@@ -221,9 +220,12 @@ class AccessControlService
 
     private function findPermission(string $permissionUid): Permission
     {
-        $permission = Permission::query()->where('uid', $permissionUid)->first();
+        $permission = Permission::query()
+            ->where('scope', Permission::SCOPE_TENANT)
+            ->where('uid', $permissionUid)
+            ->first();
 
-        if (!$permission) {
+        if (! $permission) {
             throw ValidationException::withMessages([
                 'permission_uid' => ['El permiso no existe'],
             ]);
@@ -239,6 +241,7 @@ class AccessControlService
         }
 
         $permissions = Permission::query()
+            ->where('scope', Permission::SCOPE_TENANT)
             ->whereIn('uid', $permissionUids)
             ->get();
 
@@ -257,7 +260,7 @@ class AccessControlService
     {
         $user = auth()->user();
 
-        if (!$user || $this->platformAdminIsActing() || !$user->tenant) {
+        if (! $user || $this->platformAdminIsActing() || ! $user->tenant) {
             return;
         }
 
@@ -266,7 +269,7 @@ class AccessControlService
 
     private function ensurePermissionAllowedForUserTenant($permissions, User $targetUser): void
     {
-        if ($this->platformAdminIsActing() || !$targetUser->tenant) {
+        if ($this->platformAdminIsActing() || ! $targetUser->tenant) {
             return;
         }
 
@@ -298,7 +301,7 @@ class AccessControlService
         $suffix = 2;
 
         while ($this->roleKeyExists($key, $ignoreRoleId)) {
-            $key = Str::limit($base, 95 - strlen((string) $suffix), '') . '_' . $suffix;
+            $key = Str::limit($base, 95 - strlen((string) $suffix), '').'_'.$suffix;
             $suffix++;
         }
 

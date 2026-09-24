@@ -23,7 +23,7 @@ class SupportSessionTest extends TestCase
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
 
-        $response = $this->postJson('/api/admin/tenants/' . $tenant->uid . '/support-login', [
+        $response = $this->postJson('/api/admin/tenants/'.$tenant->uid.'/support-login', [
             'reason' => 'Revision solicitada por cliente',
         ])
             ->assertCreated()
@@ -62,7 +62,7 @@ class SupportSessionTest extends TestCase
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
 
-        $token = $this->postJson('/api/admin/tenants/' . $tenant->uid . '/support-login', [
+        $token = $this->postJson('/api/admin/tenants/'.$tenant->uid.'/support-login', [
             'reason' => 'Prueba de cierre de sesion soporte',
         ])->json('data.token');
         $this->app['auth']->forgetGuards();
@@ -96,7 +96,7 @@ class SupportSessionTest extends TestCase
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
 
-        $this->postJson('/api/admin/tenants/' . $this->tenantWithOwner()->uid . '/support-login', [
+        $this->postJson('/api/admin/tenants/'.$this->tenantWithOwner()->uid.'/support-login', [
             'reason' => 'Intento sin permiso especifico',
         ])->assertForbidden();
     }
@@ -176,6 +176,9 @@ class SupportSessionTest extends TestCase
                 'module' => $module,
                 'action' => $key,
                 'description' => $key,
+                'scope' => str_starts_with($key, 'admin.')
+                    ? Permission::SCOPE_PLATFORM
+                    : Permission::SCOPE_TENANT,
             ]
         );
     }

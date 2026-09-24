@@ -6,6 +6,7 @@ use App\Models\Permission;
 use App\Models\Tenant;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PlanPermissionService
 {
@@ -82,8 +83,18 @@ class PlanPermissionService
             ->all();
     }
 
+    public function permissionModulesFor(string $module): array
+    {
+        $normalized = $this->normalizeModule($module);
+
+        return self::MODULE_PERMISSION_MAP[$normalized] ?? [$normalized];
+    }
+
     public function filterPermissionsForTenant(Collection $permissions, Tenant $tenant): Collection
     {
+        $permissions = $permissions
+            ->filter(fn (Permission $permission) => $permission->scope === Permission::SCOPE_TENANT)
+            ->values();
         $allowedModules = $this->allowedModulesForTenant($tenant);
 
         if ($allowedModules === null) {
@@ -97,6 +108,18 @@ class PlanPermissionService
 
     public function assertPermissionsAllowedForTenant(Collection $permissions, Tenant $tenant): void
     {
+        $nonTenantPermissions = $permissions
+            ->filter(fn (Permission $permission) => $permission->scope !== Permission::SCOPE_TENANT)
+            ->pluck('key')
+            ->values()
+            ->all();
+
+        if ($nonTenantPermissions !== []) {
+            throw ValidationException::withMessages([
+                'permission_uids' => ['Permisos fuera del alcance tenant: '.implode(', ', $nonTenantPermissions)],
+            ]);
+        }
+
         $allowedModules = $this->allowedModulesForTenant($tenant);
 
         if ($allowedModules === null) {
@@ -104,14 +127,14 @@ class PlanPermissionService
         }
 
         $denied = $permissions
-            ->filter(fn (Permission $permission) => !in_array($permission->module, $allowedModules, true))
+            ->filter(fn (Permission $permission) => ! in_array($permission->module, $allowedModules, true))
             ->pluck('key')
             ->values()
             ->all();
 
         if ($denied !== []) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'permission_uids' => ['Permisos no incluidos en el plan activo: ' . implode(', ', $denied)],
+            throw ValidationException::withMessages([
+                'permission_uids' => ['Permisos no incluidos en el plan activo: '.implode(', ', $denied)],
             ]);
         }
     }

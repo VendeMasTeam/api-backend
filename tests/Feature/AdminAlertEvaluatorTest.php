@@ -66,7 +66,7 @@ class AdminAlertEvaluatorTest extends TestCase
             SystemLog::withoutGlobalScopes()->create([
                 'tenant_id' => $tenant->getKey(),
                 'level' => 'error',
-                'message' => 'Error ' . $index,
+                'message' => 'Error '.$index,
                 'created_at' => now()->subMinutes(10),
                 'updated_at' => now()->subMinutes(10),
             ]);
@@ -148,6 +148,7 @@ class AdminAlertEvaluatorTest extends TestCase
                     'module' => 'admin',
                     'action' => $key,
                     'description' => $key,
+                    'scope' => Permission::SCOPE_PLATFORM,
                 ]
             );
         }

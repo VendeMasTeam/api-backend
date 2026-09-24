@@ -232,6 +232,27 @@ class SettingsBackendIntegrationTest extends TestCase
             ->assertJsonPath('data.key', 'administrador_comercial_2');
     }
 
+    public function test_tenant_rbac_rejects_platform_permissions(): void
+    {
+        $this->authenticateWithPermissions(['users.manage']);
+        $platformPermission = Permission::query()->create([
+            'key' => 'admin.test.purge',
+            'module' => 'admin',
+            'action' => 'test.purge',
+            'description' => 'Permiso de plataforma de prueba',
+            'scope' => Permission::SCOPE_PLATFORM,
+        ]);
+
+        $this->getJson('/api/rbac/permissions')
+            ->assertOk()
+            ->assertJsonMissing(['uid' => $platformPermission->uid]);
+
+        $this->postJson('/api/rbac/roles', [
+            'name' => 'Rol Invalido',
+            'permission_uids' => [$platformPermission->uid],
+        ])->assertUnprocessable();
+    }
+
     public function test_teams_member_endpoints_and_delete_guard_match_settings_contract(): void
     {
         $owner = $this->authenticateWithPermissions(['teams.read', 'teams.manage']);

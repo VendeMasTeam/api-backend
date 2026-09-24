@@ -14,12 +14,17 @@ trait HasAdminAccessControl
 
     public function hasAdminPermissionTo(string $permissionKey): bool
     {
-        if ($this->hasDirectPermission($permissionKey)) {
+        if ($this->permissions()
+            ->where('scope', Permission::SCOPE_PLATFORM)
+            ->where('key', $permissionKey)
+            ->exists()) {
             return true;
         }
 
         return $this->adminRoles()
-            ->whereHas('permissions', fn ($q) => $q->where('key', $permissionKey))
+            ->whereHas('permissions', fn ($q) => $q
+                ->where('scope', Permission::SCOPE_PLATFORM)
+                ->where('key', $permissionKey))
             ->exists();
     }
 

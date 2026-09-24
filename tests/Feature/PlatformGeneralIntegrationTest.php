@@ -78,6 +78,7 @@ class PlatformGeneralIntegrationTest extends TestCase
             ->assertJsonPath('data.modules.0.key', 'dashboard')
             ->assertJsonPath('data.modules.0.enabled', true)
             ->assertJsonPath('data.modules.1.key', 'inventory')
+            ->assertJsonPath('data.modules.1.permission_modules', ['inventory', 'products', 'price-books'])
             ->assertJsonPath('data.modules.1.enabled', true)
             ->assertJsonPath('data.modules.1.permissions.0', 'read')
             ->assertJsonPath('data.modules.1.permissions.1', 'manage')
@@ -87,6 +88,35 @@ class PlatformGeneralIntegrationTest extends TestCase
             ->assertJsonPath('data.features.reports', false)
             ->assertJsonPath('data.features.multicurrency', false)
             ->assertJsonPath('data.features.custom_fields', false);
+    }
+
+    public function test_auth_init_exposes_rbac_module_mapping_for_aggregate_areas(): void
+    {
+        $tenant = Tenant::query()->create([
+            'name' => 'Tenant Mapping',
+            'status' => 'active',
+            'is_active' => true,
+        ]);
+        $user = $this->tenantUser($tenant, [
+            'opportunities.read',
+            'contacts.read',
+            'commissions.read',
+            'competitive-intelligence.read',
+        ]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
+
+        $modules = collect($this->getJson('/api/auth/init')->assertOk()->json('data.modules'))->keyBy('key');
+
+        $this->assertSame(
+            ['opportunities', 'quotations', 'products', 'finance', 'price-books'],
+            $modules['sales']['permission_modules']
+        );
+        $this->assertSame(
+            ['accounts', 'contacts', 'relations', 'crm-entities', 'tags', 'search', 'tasks', 'interactions', 'activities', 'segments', 'documents'],
+            $modules['crm']['permission_modules']
+        );
+        $this->assertSame(['commissions'], $modules['incentives']['permission_modules']);
+        $this->assertSame(['competitive-intelligence'], $modules['intelligence']['permission_modules']);
     }
 
     public function test_auth_init_separates_platform_admin_permissions_from_tenant_permissions(): void

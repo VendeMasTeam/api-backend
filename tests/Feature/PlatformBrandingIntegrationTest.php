@@ -98,6 +98,7 @@ class PlatformBrandingIntegrationTest extends TestCase
                 'module' => 'admin',
                 'action' => 'tenants.manage',
                 'description' => 'Administrar tenants',
+                'scope' => Permission::SCOPE_PLATFORM,
             ]
         );
 

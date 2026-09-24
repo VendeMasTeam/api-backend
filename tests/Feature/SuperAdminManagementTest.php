@@ -1094,6 +1094,9 @@ class SuperAdminManagementTest extends TestCase
                 'module' => $module,
                 'action' => $key,
                 'description' => $key,
+                'scope' => str_starts_with($key, 'admin.') || $key === 'plans.manage'
+                    ? Permission::SCOPE_PLATFORM
+                    : Permission::SCOPE_TENANT,
             ]
         );
     }

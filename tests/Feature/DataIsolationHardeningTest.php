@@ -83,6 +83,7 @@ class DataIsolationHardeningTest extends TestCase
             'module' => 'admin',
             'action' => 'read',
             'description' => 'Read admin dashboard',
+            'scope' => Permission::SCOPE_PLATFORM,
         ]);
 
         $admin = User::withoutGlobalScopes()->create([
@@ -109,7 +110,7 @@ class DataIsolationHardeningTest extends TestCase
             'is_active' => true,
         ]);
         $role = $this->role($tenant, $roleKey);
-        $user = $this->user($tenant, $roleKey . '-' . uniqid());
+        $user = $this->user($tenant, $roleKey.'-'.uniqid());
         $user->assignRole($role);
 
         return [$tenant, $user];
@@ -131,7 +132,7 @@ class DataIsolationHardeningTest extends TestCase
             'tenant_id' => $tenant->getKey(),
             'manager_id' => $manager?->getKey(),
             'name' => $name,
-            'email' => $name . '-' . uniqid() . '@example.test',
+            'email' => $name.'-'.uniqid().'@example.test',
             'password' => bcrypt('secret123'),
         ]);
     }
@@ -142,7 +143,7 @@ class DataIsolationHardeningTest extends TestCase
             'tenant_id' => $tenant->getKey(),
             'owner_user_id' => $owner->getKey(),
             'name' => $name,
-            'document' => 'DOC-' . uniqid(),
+            'document' => 'DOC-'.uniqid(),
         ]);
     }
 }

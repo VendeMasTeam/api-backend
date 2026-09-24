@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Permission;
 use App\Models\User;
 
 class PlatformInitService
@@ -206,7 +205,8 @@ class PlatformInitService
                 return [
                     'key' => $key,
                     'label' => $module['label'],
-                    'enabled' => $disabled ? false : !empty($actions),
+                    'permission_modules' => $this->planPermissionService->permissionModulesFor($key),
+                    'enabled' => $disabled ? false : ! empty($actions),
                     'permissions' => $disabled ? [] : $actions,
                     'items' => $this->moduleItems($key, $effectivePermissionKeys, $disabled, $featureFlags),
                 ];

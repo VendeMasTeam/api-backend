@@ -78,7 +78,7 @@ class TwoFactorManagementTest extends TestCase
             'two_factor_recovery_codes' => ['hashed-code'],
         ]);
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->deleteJson('/api/2fa', [
             'password' => 'secret123',
@@ -99,7 +99,7 @@ class TwoFactorManagementTest extends TestCase
         $tenant = $this->tenant('Tenant 2FA Setup');
         $user = $this->tenantUser($tenant, 'setup-own-2fa@example.test');
 
-        Sanctum::actingAs($user, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($user, ['access:full', 'tenant:'.$tenant->uid]);
 
         $this->getJson('/api/2fa/setup')
             ->assertOk()
@@ -119,9 +119,9 @@ class TwoFactorManagementTest extends TestCase
             'two_factor_recovery_codes' => ['hashed-code'],
         ]);
 
-        Sanctum::actingAs($admin, ['access:full', 'tenant:' . $tenant->uid]);
+        Sanctum::actingAs($admin, ['access:full', 'tenant:'.$tenant->uid]);
 
-        $this->postJson('/api/users/' . $target->uid . '/2fa/reset')
+        $this->postJson('/api/users/'.$target->uid.'/2fa/reset')
             ->assertOk()
             ->assertJsonPath('data.uid', $target->uid)
             ->assertJsonPath('data.two_factor_enabled', false);
@@ -138,9 +138,9 @@ class TwoFactorManagementTest extends TestCase
             'two_factor_confirmed_at' => now(),
         ]);
 
-        Sanctum::actingAs($admin, ['access:full', 'tenant:' . $tenantA->uid]);
+        Sanctum::actingAs($admin, ['access:full', 'tenant:'.$tenantA->uid]);
 
-        $this->postJson('/api/users/' . $target->uid . '/2fa/reset')
+        $this->postJson('/api/users/'.$target->uid.'/2fa/reset')
             ->assertNotFound();
     }
 
@@ -168,7 +168,7 @@ class TwoFactorManagementTest extends TestCase
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
 
-        $this->postJson('/api/admin/platform/users/' . $target->uid . '/2fa/reset')
+        $this->postJson('/api/admin/platform/users/'.$target->uid.'/2fa/reset')
             ->assertOk()
             ->assertJsonPath('data.uid', $target->uid)
             ->assertJsonPath('data.two_factor_enabled', false);
@@ -194,7 +194,7 @@ class TwoFactorManagementTest extends TestCase
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
 
-        $this->postJson('/api/admin/tenants/' . $tenant->uid . '/users/' . $target->uid . '/2fa/reset')
+        $this->postJson('/api/admin/tenants/'.$tenant->uid.'/users/'.$target->uid.'/2fa/reset')
             ->assertOk()
             ->assertJsonPath('data.uid', $target->uid)
             ->assertJsonPath('data.two_factor_enabled', false);
@@ -220,7 +220,7 @@ class TwoFactorManagementTest extends TestCase
 
         Sanctum::actingAs($admin, ['access:full', 'platform:admin']);
 
-        $this->postJson('/api/admin/tenants/' . $tenantA->uid . '/users/' . $target->uid . '/2fa/reset')
+        $this->postJson('/api/admin/tenants/'.$tenantA->uid.'/users/'.$target->uid.'/2fa/reset')
             ->assertNotFound();
     }
 
@@ -252,6 +252,9 @@ class TwoFactorManagementTest extends TestCase
                     'module' => str_contains($key, '.') ? explode('.', $key)[0] : 'users',
                     'action' => $key,
                     'description' => $key,
+                    'scope' => str_starts_with($key, 'admin.')
+                        ? Permission::SCOPE_PLATFORM
+                        : Permission::SCOPE_TENANT,
                 ]
             );
         }

@@ -31,19 +31,27 @@ trait HasAccessControl
 
     public function hasPermissionTo(string $permissionKey): bool
     {
-        if ($this->hasDirectPermission($permissionKey)) {
+        if ($this->permissions()
+            ->where('scope', Permission::SCOPE_TENANT)
+            ->where('key', $permissionKey)
+            ->exists()) {
             return true;
         }
 
         return $this->roles()
-            ->whereHas('permissions', fn ($query) => $query->where('key', $permissionKey))
+            ->whereHas('permissions', fn ($query) => $query
+                ->where('scope', Permission::SCOPE_TENANT)
+                ->where('key', $permissionKey))
             ->exists();
     }
 
     public function effectivePermissions()
     {
-        $directPermissions = $this->permissions()->get();
+        $directPermissions = $this->permissions()
+            ->where('scope', Permission::SCOPE_TENANT)
+            ->get();
         $rolePermissions = Permission::query()
+            ->where('scope', Permission::SCOPE_TENANT)
             ->whereHas('roles.users', fn ($query) => $query->where('users.id', $this->getKey()))
             ->get();
 
